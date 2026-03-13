@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  synthetic-tsad:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: synthetic_tsad
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff format check
+        run: python -m ruff format --check src apps tests scripts
+
+      - name: Ruff lint
+        run: python -m ruff check src apps tests scripts
+
+      - name: Pyright
+        run: python -m pyright
+
+      - name: Pytest
+        run: python -m pytest -q

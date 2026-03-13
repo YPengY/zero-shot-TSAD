@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synthetic-tsad"
+version = "0.2.0"
+description = "Synthetic TSAD data generator aligned with TimeRCD Appendix-C"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pyright>=1.1.390",
+  "ruff>=0.11.0",
+  "types-PyYAML>=6.0.12",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "apps", "tests", "scripts"]
+extend-exclude = ["outputs", "outputs_smoke"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"apps/tsad_studio/server.py" = ["E402"]
+"apps/tsad_studio/studio_core.py" = ["E402"]
+"scripts/generate_dataset.py" = ["E402"]
+"tests/*_console.py" = ["E402", "B905"]
+"tests/test_studio_metadata.py" = ["E402"]

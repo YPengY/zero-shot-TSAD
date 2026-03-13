@@ -1,0 +1,92 @@
+﻿# Python cache / bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+.venv_iso_*/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Test / tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Temporary files
+.tmp/
+.tmp_cli_config.json
+py_write_test.txt
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+.eslintcache
+.cache/
+.ipynb_checkpoints/
+.python-version
+*.swp
+*.swo
+*.swn
+*.code-workspace
+
+
+--*
+
+# Generated dataset outputs
+outputs*/
+
+# Local cleanup/archive folders
+_cleanup_archive_*/
+
+# Local notes / references (not source code)
+timercd_translated.txt
+
+# Local environment files
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+*.local
+
+# Frontend / JS tooling
+node_modules/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Type-check / local state
+.pyright/
+.pyre/
+*.db
+*.sqlite
+*.sqlite3
+*.pid
+*.pid.lock
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

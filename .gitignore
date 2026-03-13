@@ -1,0 +1,23 @@
+# Root-local environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Tooling cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Generated outputs and local data
+datasets/
+**/outputs*/
+
+# Packaging noise
+*.egg-info/
