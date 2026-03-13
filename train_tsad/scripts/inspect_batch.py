@@ -1,0 +1,1 @@
+"""Batch inspection entrypoint placeholder."""

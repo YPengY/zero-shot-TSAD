@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import torch
+from torch import nn
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
+
+
+@dataclass(slots=True)
+class CheckpointManager:
+    """Persist latest/best checkpoints and auxiliary training artifacts."""
+
+    output_dir: Path
+
+    def __post_init__(self) -> None:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_checkpoint(
+        self,
+        *,
+        filename: str,
+        epoch: int,
+        model: nn.Module,
+        optimizer: Optimizer,
+        scheduler: LRScheduler | None,
+        metrics: dict[str, float],
+        config: dict[str, Any] | None = None,
+    ) -> Path:
+        checkpoint_path = self.output_dir / filename
+        state = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+            "metrics": metrics,
+            "config": config,
+        }
+        torch.save(state, checkpoint_path)
+        return checkpoint_path
+
+    def save_latest(
+        self,
+        *,
+        epoch: int,
+        model: nn.Module,
+        optimizer: Optimizer,
+        scheduler: LRScheduler | None,
+        metrics: dict[str, float],
+        config: dict[str, Any] | None = None,
+    ) -> Path:
+        return self.save_checkpoint(
+            filename="latest.pt",
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            metrics=metrics,
+            config=config,
+        )
+
+    def save_best(
+        self,
+        *,
+        epoch: int,
+        model: nn.Module,
+        optimizer: Optimizer,
+        scheduler: LRScheduler | None,
+        metrics: dict[str, float],
+        config: dict[str, Any] | None = None,
+    ) -> Path:
+        return self.save_checkpoint(
+            filename="best.pt",
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            metrics=metrics,
+            config=config,
+        )
+
+    def save_json(self, filename: str, payload: Any) -> Path:
+        path = self.output_dir / filename
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return path
+
+
+__all__ = ["CheckpointManager"]

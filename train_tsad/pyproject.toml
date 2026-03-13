@@ -1,0 +1,5 @@
+[project]
+name = "train-tsad"
+version = "0.0.0"
+description = "Training skeleton for zero-shot TSAD"
+requires-python = ">=3.10"
