@@ -9,6 +9,8 @@ from ..config import OptimizerConfig
 
 
 def _trainable_parameters(model: nn.Module) -> Iterable[nn.Parameter]:
+    """Yield only parameters that require gradients."""
+
     return (parameter for parameter in model.parameters() if parameter.requires_grad)
 
 

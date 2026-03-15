@@ -26,14 +26,19 @@ from train_tsad.data import (  # noqa: E402
     SyntheticTsadDataset,
 )
 from train_tsad.evaluation import TimeRCDEvaluator  # noqa: E402
+from train_tsad.evaluation import PatchFeatureEvaluator  # noqa: E402
 from train_tsad.models import TimeRCDModel  # noqa: E402
 
 
 def _resolve_path(path: Path, *, base_dir: Path) -> Path:
+    """Resolve relative paths against the project root."""
+
     return path if path.is_absolute() else (base_dir / path).resolve()
 
 
 def _build_raw_dataset(config: ExperimentConfig, *, split: str):
+    """Create the raw dataset for the target evaluation split."""
+
     dataset_root = _resolve_path(config.data.dataset_root, base_dir=PROJECT_ROOT)
     manifest_path = config.data.manifest_path(split)
     manifest_path = _resolve_path(manifest_path, base_dir=PROJECT_ROOT)
@@ -48,6 +53,13 @@ def _build_raw_dataset(config: ExperimentConfig, *, split: str):
 
 
 def _build_eval_loader(raw_dataset, *, config: ExperimentConfig) -> DataLoader:
+    """Build a deterministic evaluation DataLoader.
+
+    Notes:
+    - Always disables shuffle/drop_last to keep metric computation stable.
+    - Disables reconstruction-target construction in collate for eval speed.
+    """
+
     windowizer = SlidingContextWindowizer(
         context_size=config.data.context_size,
         patch_size=config.data.patch_size,
@@ -68,6 +80,8 @@ def _build_eval_loader(raw_dataset, *, config: ExperimentConfig) -> DataLoader:
 
 
 def _infer_fixed_num_features(raw_dataset) -> int:
+    """Infer the unique feature-channel count used to build the model."""
+
     feature_counts = {int(raw_dataset[index].series.shape[1]) for index in range(len(raw_dataset))}
     if not feature_counts:
         raise FileNotFoundError("Could not infer the number of feature channels from the evaluation dataset.")
@@ -80,6 +94,8 @@ def _infer_fixed_num_features(raw_dataset) -> int:
 
 
 def _resolve_device(requested: str) -> torch.device:
+    """Resolve runtime device with a safe CUDA fallback."""
+
     if requested.startswith("cuda") and not torch.cuda.is_available():
         print("CUDA is unavailable. Falling back to CPU.")
         return torch.device("cpu")
@@ -87,6 +103,8 @@ def _resolve_device(requested: str) -> torch.device:
 
 
 def _auto_split(config: ExperimentConfig) -> str:
+    """Pick the first available split in priority: test -> val -> train."""
+
     for split in (config.data.test_split, config.data.validation_split, config.data.split):
         try:
             _build_raw_dataset(config, split=split)
@@ -97,6 +115,8 @@ def _auto_split(config: ExperimentConfig) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse evaluation entrypoint CLI arguments."""
+
     default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_small.json"
     parser = argparse.ArgumentParser(description="Evaluate a trained TimeRCD checkpoint.")
     parser.add_argument(
@@ -133,6 +153,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run end-to-end evaluation for a trained checkpoint.
+
+    Workflow:
+    1. Load config and select split/checkpoint.
+    2. Build dataset/loader and instantiate model with matching feature size.
+    3. Stream batches through evaluator and report detection metrics.
+    """
+
     args = parse_args()
     config = ExperimentConfig.from_file(args.config)
     if args.device is not None:
@@ -141,6 +169,7 @@ def main() -> None:
     config.data.dataset_root = _resolve_path(config.data.dataset_root, base_dir=PROJECT_ROOT)
     config.train.output_dir = _resolve_path(config.train.output_dir, base_dir=PROJECT_ROOT)
 
+    # If split is unspecified, auto-discover a usable split by preference order.
     split = args.split or _auto_split(config)
     checkpoint_path = args.checkpoint or (config.train.output_dir / "best.pt")
     checkpoint_path = _resolve_path(checkpoint_path, base_dir=PROJECT_ROOT)
@@ -173,14 +202,25 @@ def main() -> None:
     model.to(device)
     model.eval()
 
-    evaluator = TimeRCDEvaluator(
-        patch_size=config.data.patch_size,
-        score_reduction=config.eval.score_reduction,
-        point_score_aggregation=config.eval.point_score_aggregation,
-        threshold=config.eval.threshold,
-        threshold_search=config.eval.threshold_search,
-        threshold_search_metric=config.eval.threshold_search_metric,
-    )
+    if config.eval.task == "patch_feature":
+        evaluator = PatchFeatureEvaluator(
+            patch_size=config.data.patch_size,
+            patch_feature_score_aggregation=config.eval.patch_feature_score_aggregation,
+            threshold=config.eval.threshold,
+            threshold_search=config.eval.threshold_search,
+            threshold_search_metric=config.eval.threshold_search_metric,
+            report_per_feature=config.eval.report_per_feature,
+            report_per_sample=config.eval.report_per_sample,
+        )
+    else:
+        evaluator = TimeRCDEvaluator(
+            patch_size=config.data.patch_size,
+            score_reduction=config.eval.score_reduction,
+            point_score_aggregation=config.eval.point_score_aggregation,
+            threshold=config.eval.threshold,
+            threshold_search=config.eval.threshold_search,
+            threshold_search_metric=config.eval.threshold_search_metric,
+        )
 
     with torch.no_grad():
         for batch in loader:

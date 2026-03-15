@@ -12,7 +12,12 @@ def build_scheduler(
     *,
     max_epochs: int,
 ) -> LRScheduler | None:
-    """Build an epoch-level learning-rate scheduler."""
+    """Build an epoch-level learning-rate scheduler.
+
+    Supported modes:
+    - `none`/`constant`: no scheduler
+    - `cosine`: optional linear warmup followed by cosine annealing
+    """
 
     name = config.scheduler.lower()
     if name in {"none", "constant"}:

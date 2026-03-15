@@ -42,6 +42,8 @@ class PatchEmbedding(nn.Module):
         d_proj: int,
         dropout: float = 0.1,
     ) -> None:
+        """Configure patch tokenization and projection layers."""
+
         super().__init__()
 
         if patch_size <= 0:
@@ -87,6 +89,13 @@ class PatchEmbedding(nn.Module):
         return patches.transpose(1, 2).contiguous()
 
     def forward(self, inputs: Tensor) -> PatchEmbeddingOutput:
+        """Project point windows into encoder token sequence.
+
+        Returns:
+            PatchEmbeddingOutput containing both intermediate views and final
+            flattened tokens used by the Transformer encoder.
+        """
+
         patches = self.patchify(inputs)
         batch_size, num_patches, num_features, _ = patches.shape
 

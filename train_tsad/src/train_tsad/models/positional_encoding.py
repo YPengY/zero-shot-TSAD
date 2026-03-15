@@ -7,6 +7,8 @@ from torch import Tensor, nn
 
 
 def _build_sinusoidal_table(length: int, d_model: int) -> Tensor:
+    """Build classic sinusoidal position table `[length, d_model]`."""
+
     position = torch.arange(length, dtype=torch.float32).unsqueeze(1)
     div_term = torch.exp(
         torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model)
@@ -30,6 +32,8 @@ class GridPositionalEncoding(nn.Module):
         dropout: float = 0.1,
         learned: bool = True,
     ) -> None:
+        """Configure factorized patch-position and feature-position encoding."""
+
         super().__init__()
 
         if d_model <= 0:
@@ -63,6 +67,8 @@ class GridPositionalEncoding(nn.Module):
             )
 
     def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
+        """Add positional signal on `(patch, feature)` grid then apply dropout."""
+
         if tokens.ndim != 3:
             raise ValueError(f"`tokens` must have shape [B, L, d_model], got ndim={tokens.ndim}.")
         if tokens.shape[-1] != self.d_model:
@@ -95,6 +101,7 @@ class GridPositionalEncoding(nn.Module):
             patch_pos = self.patch_table[:num_patches].to(tokens.device)
             feature_pos = self.feature_table[:num_features].to(tokens.device)
 
+        # Factorized 2D position: patch embedding + feature embedding.
         position_grid = patch_pos[:, None, :] + feature_pos[None, :, :]
         position_tokens = position_grid.reshape(1, num_patches * num_features, self.d_model)
         return self.dropout(tokens + position_tokens)

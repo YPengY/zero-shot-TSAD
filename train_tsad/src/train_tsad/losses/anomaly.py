@@ -18,6 +18,13 @@ class PatchAnomalyLoss(nn.Module):
         pos_weight: float | None = None,
         label_smoothing: float = 0.0,
     ) -> None:
+        """Configure BCE-with-logits anomaly objective.
+
+        Args:
+            pos_weight: Optional positive-class weight for class imbalance.
+            label_smoothing: Smooth binary targets toward 0.5.
+        """
+
         super().__init__()
 
         if pos_weight is not None and pos_weight <= 0:
@@ -36,11 +43,19 @@ class PatchAnomalyLoss(nn.Module):
             )
 
     def _smoothed_targets(self, targets: Tensor) -> Tensor:
+        """Apply label smoothing to binary targets."""
+
         if self.label_smoothing == 0.0:
             return targets
         return targets * (1.0 - self.label_smoothing) + 0.5 * self.label_smoothing
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
+        """Compute anomaly loss and monitoring metrics on patch grid.
+
+        Inputs:
+            `output.logits` and `batch.patch_labels` with shape `[B, N_patches, D]`.
+        """
+
         if batch.patch_labels is None:
             raise ValueError("`batch.patch_labels` is required for anomaly loss.")
 
@@ -62,6 +77,7 @@ class PatchAnomalyLoss(nn.Module):
         )
 
         with torch.no_grad():
+            # Quick training diagnostics at threshold=0.5.
             probabilities = torch.sigmoid(logits)
             predictions = probabilities >= 0.5
             binary_targets = targets >= 0.5

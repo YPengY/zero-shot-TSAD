@@ -600,7 +600,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "num_samples": 100,
     "sequence_length": {"min": 100, "max": 1000},
     "anomaly_sample_ratio": 0.7,
-    "num_series": {"min": 2, "max": 8},
+    "num_series": {"min": 6, "max": 6},
     "seed": 42,
     "weights": {
         "seasonality_type": {

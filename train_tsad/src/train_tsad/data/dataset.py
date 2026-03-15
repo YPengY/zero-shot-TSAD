@@ -35,12 +35,16 @@ class _ShardSampleRecord:
 
 
 def _ensure_2d_array(name: str, value: np.ndarray) -> np.ndarray:
+    """Validate array shape as `[T, D]`."""
+
     if value.ndim != 2:
         raise ValueError(f"{name} must be 2D [T, D], got shape {value.shape}")
     return value
 
 
 def _ensure_1d_array(name: str, value: np.ndarray, expected_length: int) -> np.ndarray:
+    """Validate array shape as `[T]` and enforce sequence length."""
+
     if value.ndim != 1:
         raise ValueError(f"{name} must be 1D [T], got shape {value.shape}")
     if value.shape[0] != expected_length:
@@ -51,17 +55,23 @@ def _ensure_1d_array(name: str, value: np.ndarray, expected_length: int) -> np.n
 
 
 def _optional_json_path(npz_path: Path) -> Path | None:
+    """Return sibling `.json` path if present."""
+
     json_path = npz_path.with_suffix(".json")
     return json_path if json_path.exists() else None
 
 
 def _load_json_payload(json_path: Path | None) -> Metadata:
+    """Load optional JSON metadata payload."""
+
     if json_path is None:
         return {}
     return json.loads(json_path.read_text(encoding="utf-8"))
 
 
 def _resolve_sample_id(npz_path: Path, payload: Metadata) -> str:
+    """Resolve stable sample id from metadata when available."""
+
     summary = payload.get("summary")
     if isinstance(summary, dict) and "sample_id" in summary:
         return f"sample_{int(summary['sample_id']):06d}"
@@ -69,6 +79,8 @@ def _resolve_sample_id(npz_path: Path, payload: Metadata) -> str:
 
 
 def _resolve_manifest_path(base_dir: Path, raw_path: str | None) -> Path | None:
+    """Resolve relative manifest path against the manifest directory."""
+
     if raw_path is None:
         return None
     path = Path(raw_path)
@@ -78,6 +90,8 @@ def _resolve_manifest_path(base_dir: Path, raw_path: str | None) -> Path | None:
 
 
 def _iter_raw_records_from_directory(base_dir: Path) -> Iterator[_RawSampleRecord]:
+    """Yield sample records from `sample_*.npz` files in one directory."""
+
     for npz_path in sorted(base_dir.glob("sample_*.npz")):
         yield _RawSampleRecord(
             sample_id=npz_path.stem,
@@ -87,6 +101,8 @@ def _iter_raw_records_from_directory(base_dir: Path) -> Iterator[_RawSampleRecor
 
 
 def _iter_raw_records_from_jsonl(manifest_path: Path) -> Iterator[_RawSampleRecord]:
+    """Yield sample records described by a raw-sample JSONL manifest."""
+
     base_dir = manifest_path.parent
     for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -101,6 +117,8 @@ def _iter_raw_records_from_jsonl(manifest_path: Path) -> Iterator[_RawSampleReco
 
 
 def _iter_raw_records_from_csv(manifest_path: Path) -> Iterator[_RawSampleRecord]:
+    """Yield sample records described by a raw-sample CSV manifest."""
+
     base_dir = manifest_path.parent
     with manifest_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -114,6 +132,8 @@ def _iter_raw_records_from_csv(manifest_path: Path) -> Iterator[_RawSampleRecord
 
 
 def _iter_shard_records_from_jsonl(manifest_path: Path) -> Iterator[_ShardSampleRecord]:
+    """Yield shard sample records from packed-dataset JSONL manifest."""
+
     base_dir = manifest_path.parent
     for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -142,6 +162,12 @@ def _load_raw_sample(
     npz_path: Path,
     json_path: Path | None,
 ) -> RawSample:
+    """Load one sample from NPZ (+ optional JSON) into the canonical `RawSample`.
+
+    Side effects:
+        Reads sample files from disk. Does not cache by itself.
+    """
+
     payload = _load_json_payload(json_path)
 
     with np.load(npz_path, allow_pickle=False) as npz:
@@ -208,15 +234,21 @@ class SyntheticTsadDataset:
         split: SplitName = "train",
         manifest_path: str | Path | None = None,
     ) -> None:
+        """Build dataset index for per-sample NPZ/JSON files."""
+
         self.root_dir = Path(root_dir).resolve()
         self.split = split
         self.manifest_path = Path(manifest_path).resolve() if manifest_path is not None else None
         self._records = self._build_index()
 
     def __len__(self) -> int:
+        """Return number of raw samples."""
+
         return len(self._records)
 
     def __getitem__(self, index: int) -> RawSample:
+        """Load one raw sample by index."""
+
         record = self._records[index]
         return _load_raw_sample(
             sample_id=record.sample_id,
@@ -226,6 +258,8 @@ class SyntheticTsadDataset:
         )
 
     def _build_index(self) -> list[_RawSampleRecord]:
+        """Create sample index from manifest or directory scan."""
+
         if self.manifest_path is not None:
             if self.manifest_path.suffix == ".jsonl":
                 records = list(_iter_raw_records_from_jsonl(self.manifest_path))
@@ -255,6 +289,8 @@ class SyntheticTsadDataset:
         return records
 
     def _resolve_base_dir(self) -> Path:
+        """Resolve `<root>/<split>` when present, otherwise fall back to `<root>`."""
+
         split_dir = self.root_dir / self.split
         return split_dir if split_dir.is_dir() else self.root_dir
 
@@ -269,6 +305,8 @@ class ShardedSyntheticTsadDataset:
         manifest_path: str | Path | None = None,
         max_cached_shards: int = 2,
     ) -> None:
+        """Initialize shard-backed dataset with a small LRU-like cache."""
+
         self.root_dir = Path(root_dir).resolve()
         self.split = split
         self.manifest_path = (
@@ -282,9 +320,19 @@ class ShardedSyntheticTsadDataset:
         self._shard_metadata_cache: OrderedDict[Path, list[Metadata]] = OrderedDict()
 
     def __len__(self) -> int:
+        """Return number of samples indexed by the shard manifest."""
+
         return len(self._records)
 
     def __getitem__(self, index: int) -> RawSample:
+        """Load one sample slice from a packed shard NPZ.
+
+        Workflow:
+        1. Load shard arrays/metadata from cache (or disk).
+        2. Use offsets to slice flattened arrays into `[T, D]` tensors.
+        3. Return a detached `RawSample` with source trace in metadata.
+        """
+
         record = self._records[index]
         shard_arrays = self._get_cached_shard_arrays(record.shard_npz_path)
         shard_metadata = self._get_cached_shard_metadata(record.shard_jsonl_path)
@@ -311,6 +359,7 @@ class ShardedSyntheticTsadDataset:
         time_start = int(time_offsets[sample_index])
         time_end = int(time_offsets[sample_index + 1])
 
+        # Data is stored flattened; offsets map each sample back to `[T, D]`.
         series = shard_arrays["series_values"][flat_start:flat_end].reshape(length, num_dim).copy()
         normal_series = (
             shard_arrays["normal_series_values"][flat_start:flat_end].reshape(length, num_dim).copy()
@@ -339,6 +388,8 @@ class ShardedSyntheticTsadDataset:
         )
 
     def _build_index(self) -> list[_ShardSampleRecord]:
+        """Validate shard manifest and build random-access record list."""
+
         if not self.manifest_path.exists():
             raise FileNotFoundError(f"Missing shard manifest: {self.manifest_path}")
 
@@ -355,6 +406,8 @@ class ShardedSyntheticTsadDataset:
         return records
 
     def _get_cached_shard_arrays(self, shard_path: Path) -> dict[str, np.ndarray]:
+        """Return shard arrays from cache and refresh recency."""
+
         cached = self._shard_array_cache.pop(shard_path, None)
         if cached is None:
             with np.load(shard_path, allow_pickle=False) as npz:
@@ -364,6 +417,8 @@ class ShardedSyntheticTsadDataset:
         return cached
 
     def _get_cached_shard_metadata(self, shard_jsonl_path: Path) -> list[Metadata]:
+        """Return shard metadata rows from cache and refresh recency."""
+
         cached = self._shard_metadata_cache.pop(shard_jsonl_path, None)
         if cached is None:
             cached = [
@@ -376,6 +431,8 @@ class ShardedSyntheticTsadDataset:
         return cached
 
     def _evict_cache(self, cache: OrderedDict[Path, object]) -> None:
+        """Evict oldest cache entries until the cache fits `max_cached_shards`."""
+
         while len(cache) > self.max_cached_shards:
             cache.popitem(last=False)
 
@@ -393,20 +450,28 @@ class ContextWindowDataset:
         raw_dataset: DatasetProtocol,
         windowizer: ContextWindowizerProtocol,
     ) -> None:
+        """Build a flat `(sample_idx, window_idx)` index for window-level access."""
+
         self.raw_dataset = raw_dataset
         self.windowizer = windowizer
         self._index = self._build_index()
 
     def __len__(self) -> int:
+        """Return number of windows across all raw samples."""
+
         return len(self._index)
 
     def __getitem__(self, index: int) -> ContextWindowSample:
+        """Load one window by first loading its parent raw sample on demand."""
+
         raw_index, window_index = self._index[index]
         sample = self.raw_dataset[raw_index]
         windows = self.windowizer.transform(sample)
         return windows[window_index]
 
     def _build_index(self) -> list[tuple[int, int]]:
+        """Precompute mapping from flat window index to raw-sample/window pair."""
+
         index: list[tuple[int, int]] = []
         for raw_index in range(len(self.raw_dataset)):
             sample = self.raw_dataset[raw_index]

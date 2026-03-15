@@ -8,6 +8,8 @@ from ..interfaces import ContextWindowSample, ContextWindowizerProtocol, RawSamp
 
 
 def _as_float32_2d(array: np.ndarray, *, name: str) -> np.ndarray:
+    """Validate `[T, D]` numeric input and cast to float32."""
+
     value = np.asarray(array, dtype=np.float32)
     if value.ndim != 2:
         raise ValueError(f"`{name}` must have shape [T, D], got ndim={value.ndim}.")
@@ -19,6 +21,8 @@ def _as_float32_2d(array: np.ndarray, *, name: str) -> np.ndarray:
 
 
 def _as_mask_2d(array: np.ndarray, *, name: str) -> np.ndarray:
+    """Validate mask shape `[T, D]` and convert to binary uint8."""
+
     value = np.asarray(array)
     if value.ndim != 2:
         raise ValueError(f"`{name}` must have shape [T, D], got ndim={value.ndim}.")
@@ -26,6 +30,8 @@ def _as_mask_2d(array: np.ndarray, *, name: str) -> np.ndarray:
 
 
 def _as_mask_1d(array: np.ndarray, *, name: str) -> np.ndarray:
+    """Validate mask shape `[T]` and convert to binary uint8."""
+
     value = np.asarray(array)
     if value.ndim != 1:
         raise ValueError(f"`{name}` must have shape [T], got ndim={value.ndim}.")
@@ -41,6 +47,8 @@ def _slice_or_pad_2d(
     pad_value: float | int,
     dtype: np.dtype[np.generic] | type[np.generic],
 ) -> np.ndarray:
+    """Slice `[T, D]` region and right-pad to a fixed window length."""
+
     window = np.asarray(array[start:end], dtype=dtype)
     if window.shape[0] > target_length:
         raise ValueError("Window length cannot exceed target length.")
@@ -60,6 +68,8 @@ def _slice_or_pad_1d(
     target_length: int,
     pad_value: int,
 ) -> np.ndarray:
+    """Slice `[T]` region and right-pad to a fixed window length."""
+
     window = np.asarray(array[start:end], dtype=np.uint8)
     if window.shape[0] > target_length:
         raise ValueError("Window length cannot exceed target length.")
@@ -72,6 +82,11 @@ def _slice_or_pad_1d(
 
 
 def _build_patch_labels(point_mask: np.ndarray, patch_size: int) -> np.ndarray:
+    """Aggregate point anomaly mask `[W, D]` into patch labels `[N_patches, D]`.
+
+    Each patch is labeled anomalous when any point inside that patch is anomalous.
+    """
+
     if point_mask.ndim != 2:
         raise ValueError("`point_mask` must have shape [W, D].")
     if point_mask.shape[0] % patch_size != 0:
@@ -98,6 +113,8 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
     include_tail: bool = True
 
     def __post_init__(self) -> None:
+        """Validate windowizer geometry and infer default stride."""
+
         if self.context_size <= 0:
             raise ValueError("`context_size` must be positive.")
         if self.patch_size <= 0:
@@ -111,6 +128,15 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
             raise ValueError("`stride` must be positive.")
 
     def transform(self, sample: RawSample) -> tuple[ContextWindowSample, ...]:
+        """Convert one raw sequence into fixed-size context windows.
+
+        Workflow:
+        1. Validate source arrays and align optional masks.
+        2. Iterate window bounds from `_iter_context_bounds`.
+        3. Slice/pad per-window tensors and build patch-level labels.
+        4. Return immutable tuple of `ContextWindowSample`.
+        """
+
         series = _as_float32_2d(sample.series, name="series")
         point_mask = sample.point_mask
         if point_mask is None:
@@ -144,6 +170,7 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
 
         windows: list[ContextWindowSample] = []
         for start, end in self._iter_context_bounds(series.shape[0]):
+            # Window tensors are always fixed to `context_size` so collate can stack safely.
             window_series = _slice_or_pad_2d(
                 series,
                 start=start,
@@ -195,6 +222,14 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
         return tuple(windows)
 
     def _iter_context_bounds(self, sequence_length: int) -> tuple[tuple[int, int], ...]:
+        """Generate `(start, end)` windows over one sequence.
+
+        Behavior:
+        - Short sequences are optionally represented as one padded window.
+        - Long sequences use `stride`; optional `include_tail` ensures last points
+          are not dropped when stride does not land exactly on the end.
+        """
+
         if sequence_length <= 0:
             raise ValueError("`series` must contain at least one time step.")
         if sequence_length < self.context_size:

@@ -33,6 +33,8 @@ class RandomPatchMaskingTransform:
         seed: int | None = None,
         min_masked_tokens: int = 1,
     ) -> None:
+        """Configure random masking over the patch-feature token grid."""
+
         if patch_size <= 0:
             raise ValueError("`patch_size` must be positive.")
         if not 0.0 <= mask_ratio <= 1.0:
@@ -48,6 +50,18 @@ class RandomPatchMaskingTransform:
             self.generator.manual_seed(seed)
 
     def __call__(self, inputs: Tensor) -> MaskingTargets:
+        """Generate reconstruction targets and point-level mask indices.
+
+        Args:
+            inputs: Tensor shaped `[B, W, D]`.
+
+        Returns:
+            MaskingTargets containing:
+            - `reconstruction_targets`: original unmasked inputs
+            - `mask_indices`: bool mask `[B, W, D]` used to zero model inputs
+            - `metadata`: configured vs realized mask ratios
+        """
+
         if inputs.ndim != 3:
             raise ValueError(f"`inputs` must have shape [B, W, D], got ndim={inputs.ndim}.")
 
@@ -83,6 +97,7 @@ class RandomPatchMaskingTransform:
                 patch_mask[batch_index, permutation[:num_masked_tokens]] = True
             patch_mask = patch_mask.reshape(batch_size, num_patches, num_features)
 
+        # Expand patch mask back to point level along the time axis.
         mask_indices = patch_mask.repeat_interleave(self.patch_size, dim=1)
         return MaskingTargets(
             reconstruction_targets=reconstruction_targets,

@@ -1,10 +1,19 @@
-"""Evaluation utilities for point-level anomaly detection reporting."""
+"""Evaluation utilities for patch-feature and legacy point-level reporting."""
 
-from .evaluator import TimeRCDEvaluator
+from .evaluator import PatchFeatureEvaluator, TimeRCDEvaluator
 from .metrics import average_precision, compute_detection_metrics, find_best_threshold, precision_recall_f1
-from .postprocess import PointScoreAccumulator, patch_scores_to_point_scores, reduce_patch_scores
+from .postprocess import (
+    PatchFeatureAccumulator,
+    PatchFeatureRecord,
+    PointScoreAccumulator,
+    patch_scores_to_point_scores,
+    reduce_patch_scores,
+)
 
 __all__ = [
+    "PatchFeatureAccumulator",
+    "PatchFeatureEvaluator",
+    "PatchFeatureRecord",
     "PointScoreAccumulator",
     "TimeRCDEvaluator",
     "average_precision",

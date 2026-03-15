@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import torch
 from torch import nn
@@ -12,6 +12,16 @@ from torch.utils.data import DataLoader
 
 from ..interfaces import Batch, LossProtocol, ModelProtocol
 from .checkpoint import CheckpointManager
+
+
+class EpochEvaluatorProtocol(Protocol):
+    """Runtime protocol for validation-time evaluators."""
+
+    def update(self, batch: Batch, output: Any) -> None:
+        ...
+
+    def compute(self) -> dict[str, Any]:
+        ...
 
 
 @dataclass(slots=True)
@@ -50,6 +60,20 @@ class Trainer:
         gradient_accumulation_steps: int = 1,
         log_every_n_steps: int = 50,
     ) -> None:
+        """Configure the trainer runtime state.
+
+        Args:
+            model: Forward model that consumes `Batch` and returns `ModelOutput`.
+            loss_fn: Loss callable that maps `(Batch, ModelOutput)` to `LossOutput`.
+            optimizer: Optimizer used for parameter updates.
+            device: Device where model and batches are placed.
+            scheduler: Optional epoch-level scheduler stepped after each epoch.
+            checkpoint_manager: Optional artifact writer for latest/best checkpoints.
+            gradient_clip_norm: Optional global grad-norm clipping threshold.
+            gradient_accumulation_steps: Number of mini-batches per optimizer step.
+            log_every_n_steps: Training-step log interval.
+        """
+
         if gradient_accumulation_steps <= 0:
             raise ValueError("`gradient_accumulation_steps` must be positive.")
         if log_every_n_steps <= 0:
@@ -77,13 +101,29 @@ class Trainer:
         validate_every_n_epochs: int = 1,
         early_stopping_patience: int = 0,
         config_payload: dict[str, Any] | None = None,
+        validation_evaluator_factory: Callable[[], EpochEvaluatorProtocol] | None = None,
+        monitor_metric: str = "total_loss",
+        monitor_mode: str = "min",
     ) -> FitResult:
+        """Run the full train/validation loop.
+
+        Workflow:
+        1. Execute one training epoch.
+        2. Optionally execute validation on configured cadence.
+        3. Step scheduler, checkpoint latest/best, track best loss.
+        4. Stop early when no improvement exceeds patience.
+        """
+
         if max_epochs <= 0:
             raise ValueError("`max_epochs` must be positive.")
         if validate_every_n_epochs <= 0:
             raise ValueError("`validate_every_n_epochs` must be positive.")
         if early_stopping_patience < 0:
             raise ValueError("`early_stopping_patience` cannot be negative.")
+        if not monitor_metric.strip():
+            raise ValueError("`monitor_metric` cannot be empty.")
+        if monitor_mode not in {"min", "max"}:
+            raise ValueError("`monitor_mode` must be one of: min, max.")
 
         history: list[dict[str, Any]] = []
         best_epoch: int | None = None
@@ -102,19 +142,36 @@ class Trainer:
 
             val_metrics: dict[str, float] | None = None
             if val_loader is not None and epoch % validate_every_n_epochs == 0:
+                evaluator = (
+                    validation_evaluator_factory()
+                    if validation_evaluator_factory is not None
+                    else None
+                )
                 val_metrics = self._run_epoch(
                     loader=val_loader,
                     epoch=epoch,
                     split="val",
                     training=False,
+                    evaluator=evaluator,
                 )
 
             if self.scheduler is not None:
                 self.scheduler.step()
 
+            # Prefer validation loss when available; otherwise monitor train loss.
             monitored_metrics = val_metrics or train_metrics
-            monitored_value = monitored_metrics["total_loss"]
-            is_best = best_metric is None or monitored_value < best_metric
+            if monitor_metric not in monitored_metrics:
+                available = ", ".join(sorted(monitored_metrics))
+                raise KeyError(
+                    f"Monitor metric `{monitor_metric}` is unavailable in epoch metrics. "
+                    f"Available metrics: {available}."
+                )
+            monitored_value = monitored_metrics[monitor_metric]
+            is_best = self._is_better(
+                candidate=monitored_value,
+                current_best=best_metric,
+                mode=monitor_mode,
+            )
 
             epoch_record: dict[str, Any] = {
                 "epoch": epoch,
@@ -158,7 +215,7 @@ class Trainer:
             if early_stopping_patience > 0 and bad_epoch_count >= early_stopping_patience:
                 print(
                     f"Early stopping triggered at epoch {epoch}. "
-                    f"Best epoch={best_epoch}, best_total_loss={best_metric:.6f}."
+                    f"Best epoch={best_epoch}, best_{monitor_metric}={best_metric:.6f}."
                 )
                 break
 
@@ -172,6 +229,8 @@ class Trainer:
 
     @property
     def _nn_module(self) -> nn.Module:
+        """Return `model` as `nn.Module` and fail fast on protocol-only objects."""
+
         if not isinstance(self.model, nn.Module):
             raise TypeError("Trainer currently requires `model` to be an `nn.Module` instance.")
         return self.model
@@ -183,7 +242,16 @@ class Trainer:
         epoch: int,
         split: str,
         training: bool,
+        evaluator: EpochEvaluatorProtocol | None = None,
     ) -> dict[str, float]:
+        """Run one epoch and return sample-weighted mean metrics.
+
+        Important behavior:
+        - Uses gradient accumulation when `training=True`.
+        - Applies optional gradient clipping before optimizer steps.
+        - Aggregates each metric by batch size, not by batch count.
+        """
+
         module = self._nn_module
         module.train(training)
         if training:
@@ -202,11 +270,14 @@ class Trainer:
                 output = module(batch)
                 loss_output = self.loss_fn(batch, output)
                 raw_loss = loss_output.loss
+                if evaluator is not None:
+                    evaluator.update(batch, output)
 
                 if training:
                     scaled_loss = raw_loss / self.gradient_accumulation_steps
                     scaled_loss.backward()
 
+                    # Update params only at accumulation boundaries (or final step).
                     is_update_step = (
                         step % self.gradient_accumulation_steps == 0 or step == num_batches
                     )
@@ -230,7 +301,29 @@ class Trainer:
         if sample_count == 0:
             raise ValueError(f"The `{split}` loader produced zero batches.")
 
-        return {name: total / sample_count for name, total in metric_sums.items()}
+        metrics = {name: total / sample_count for name, total in metric_sums.items()}
+        if evaluator is not None:
+            for name, value in evaluator.compute().items():
+                if isinstance(value, bool):
+                    metrics[name] = float(value)
+                elif isinstance(value, (int, float)):
+                    metrics[name] = float(value)
+        return metrics
+
+    @staticmethod
+    def _is_better(
+        *,
+        candidate: float,
+        current_best: float | None,
+        mode: str,
+    ) -> bool:
+        """Return whether `candidate` improves over `current_best` for the given mode."""
+
+        if current_best is None:
+            return True
+        if mode == "min":
+            return candidate < current_best
+        return candidate > current_best
 
     def _print_epoch_summary(
         self,
@@ -238,6 +331,8 @@ class Trainer:
         train_metrics: dict[str, float],
         val_metrics: dict[str, float] | None,
     ) -> None:
+        """Print compact train/val loss summary for one epoch."""
+
         train_loss = train_metrics.get("total_loss", float("nan"))
         message = f"[epoch {epoch}] train_total_loss={train_loss:.6f}"
         if val_metrics is not None:

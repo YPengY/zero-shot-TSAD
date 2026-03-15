@@ -19,6 +19,8 @@ class TransformerEncoder(nn.Module):
         attention_dropout: float = 0.1,
         activation: str = "gelu",
     ) -> None:
+        """Construct a batch-first Transformer encoder stack."""
+
         super().__init__()
 
         if d_model <= 0:
@@ -55,6 +57,8 @@ class TransformerEncoder(nn.Module):
                 module.self_attn.dropout = attention_dropout
 
     def forward(self, tokens: Tensor, *, padding_mask: Tensor | None = None) -> Tensor:
+        """Encode token sequence `[B, L, d_model]` with optional padding mask."""
+
         if tokens.ndim != 3:
             raise ValueError(f"`tokens` must have shape [B, L, d_model], got ndim={tokens.ndim}.")
         encoded = self.encoder(tokens, src_key_padding_mask=padding_mask)

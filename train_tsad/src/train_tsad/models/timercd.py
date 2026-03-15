@@ -29,6 +29,15 @@ class TimeRCDModel(nn.Module):
         use_learned_positional_encoding: bool = True,
         use_reconstruction_head: bool = True,
     ) -> None:
+        """Build the TimeRCD model stack.
+
+        Structure:
+        1. Patch embedding over `[B, W, D]`.
+        2. Grid positional encoding over `(patch, feature)` tokens.
+        3. Transformer encoder.
+        4. Anomaly head (+ optional reconstruction head).
+        """
+
         super().__init__()
 
         self.patch_embedding = PatchEmbedding(
@@ -61,6 +70,8 @@ class TimeRCDModel(nn.Module):
         )
 
     def _apply_input_mask(self, inputs: Tensor, mask_indices: Tensor | None) -> Tensor:
+        """Zero masked positions before patch embedding."""
+
         if mask_indices is None:
             return inputs
         if mask_indices.shape != inputs.shape:
@@ -73,8 +84,20 @@ class TimeRCDModel(nn.Module):
         return masked_inputs
 
     def forward(self, batch: Batch) -> ModelOutput:
+        """Run one forward pass from batched windows to output heads.
+
+        Inputs:
+            `batch.inputs` in shape `[B, W, D]`.
+
+        Returns:
+            `ModelOutput` with patch logits `[B, N_patches, D]` and optional
+            reconstruction aligned to `batch.reconstruction_targets`.
+        """
+
+        # Apply point-level masking used by the reconstruction pretext task.
         inputs = self._apply_input_mask(batch.inputs, batch.mask_indices)
 
+        # Tokenize fixed windows into a `[B, N_patches * D, d_model]` sequence.
         patch_output = self.patch_embedding(inputs)
         tokens = self.position_encoding(
             patch_output.tokens,
@@ -83,6 +106,7 @@ class TimeRCDModel(nn.Module):
         )
         encoded = self.encoder(tokens)
 
+        # Anomaly logits are always produced; reconstruction is optional by config.
         logits = self.anomaly_head(
             encoded,
             num_patches=patch_output.num_patches,

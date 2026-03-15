@@ -4,8 +4,8 @@ sequence_length:
   max: 1000
 anomaly_sample_ratio: 0.7
 num_series:
-  min: 2
-  max: 8
+  min: 6
+  max: 6
 seed: 42
 weights:
   seasonality_type:

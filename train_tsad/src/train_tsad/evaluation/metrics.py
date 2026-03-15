@@ -4,6 +4,8 @@ import numpy as np
 
 
 def _as_flat_numpy(values) -> np.ndarray:
+    """Convert scores/targets to contiguous 1D NumPy array view."""
+
     array = np.asarray(values)
     if array.ndim != 1:
         array = array.reshape(-1)
@@ -113,7 +115,11 @@ def compute_detection_metrics(
     threshold_search: bool = False,
     threshold_search_metric: str = "f1",
 ) -> dict[str, float]:
-    """Compute the evaluation bundle used by the current script entrypoint."""
+    """Compute the full evaluation bundle used by script entrypoints.
+
+    Returns:
+        Dictionary containing thresholded metrics and PR-AUC statistics.
+    """
 
     if threshold_search:
         metrics = find_best_threshold(scores, targets, metric=threshold_search_metric)

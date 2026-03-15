@@ -21,3 +21,7 @@ datasets/
 
 # Packaging noise
 *.egg-info/
+# Local experiment artifacts
+analysis_tmp/
+runs/
+

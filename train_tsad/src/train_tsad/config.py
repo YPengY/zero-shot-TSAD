@@ -13,10 +13,14 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 def _coerce_path(value: str | Path) -> Path:
+    """Convert string-like path config values into `Path`."""
+
     return value if isinstance(value, Path) else Path(value)
 
 
 def _as_plain_dict(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Materialize optional mapping as a mutable plain dictionary."""
+
     return dict(value or {})
 
 
@@ -65,9 +69,13 @@ class DataConfig:
 
     @property
     def num_patches(self) -> int:
+        """Number of patches per context window (`context_size / patch_size`)."""
+
         return self.context_size // self.patch_size
 
     def manifest_path(self, split: str | None = None) -> Path:
+        """Build split-specific manifest path from template."""
+
         target_split = split or self.split
         return self.dataset_root / self.manifest_name_template.format(split=target_split)
 
@@ -114,8 +122,8 @@ class LossConfig:
     """Loss weights and anomaly supervision settings."""
 
     anomaly_loss_weight: float = 1.0
-    reconstruction_loss_weight: float = 0.2
-    anomaly_pos_weight: float | None = None
+    reconstruction_loss_weight: float = 0.01
+    anomaly_pos_weight: float | str | None = "auto"
     label_smoothing: float = 0.0
 
     def __post_init__(self) -> None:
@@ -123,7 +131,10 @@ class LossConfig:
             raise ValueError("`loss.anomaly_loss_weight` must be positive.")
         if self.reconstruction_loss_weight < 0:
             raise ValueError("`loss.reconstruction_loss_weight` cannot be negative.")
-        if self.anomaly_pos_weight is not None and self.anomaly_pos_weight <= 0:
+        if isinstance(self.anomaly_pos_weight, str):
+            if self.anomaly_pos_weight != "auto":
+                raise ValueError("`loss.anomaly_pos_weight` must be a positive float, null, or `auto`.")
+        elif self.anomaly_pos_weight is not None and self.anomaly_pos_weight <= 0:
             raise ValueError("`loss.anomaly_pos_weight` must be positive when provided.")
         if not 0.0 <= self.label_smoothing < 1.0:
             raise ValueError("`loss.label_smoothing` must be in [0, 1).")
@@ -195,15 +206,33 @@ class TrainConfig:
 class EvalConfig:
     """Evaluation and score post-processing settings."""
 
+    task: str = "patch_feature"
+    primary_metric: str = "pr_auc"
+    primary_metric_mode: str = "max"
     threshold: float = 0.5
     threshold_search: bool = False
     threshold_search_metric: str = "f1"
+    patch_feature_score_aggregation: str = "mean"
+    report_per_feature: bool = False
+    report_per_sample: bool = False
     score_reduction: str = "mean"
     point_score_aggregation: str = "mean"
 
     def __post_init__(self) -> None:
+        if self.task not in {"patch_feature", "point_any_feature_legacy"}:
+            raise ValueError(
+                "`eval.task` must be one of: patch_feature, point_any_feature_legacy."
+            )
+        if not self.primary_metric.strip():
+            raise ValueError("`eval.primary_metric` cannot be empty.")
+        if self.primary_metric_mode not in {"min", "max"}:
+            raise ValueError("`eval.primary_metric_mode` must be one of: min, max.")
         if not 0.0 <= self.threshold <= 1.0:
             raise ValueError("`eval.threshold` must be in [0, 1].")
+        if self.patch_feature_score_aggregation not in {"mean", "max"}:
+            raise ValueError(
+                "`eval.patch_feature_score_aggregation` must be one of: mean, max."
+            )
 
 
 @dataclass(slots=True)
@@ -229,6 +258,8 @@ class ExperimentConfig:
             )
 
     def to_dict(self) -> dict[str, Any]:
+        """Export config dataclasses as JSON-serializable dictionary."""
+
         payload = asdict(self)
         payload["data"]["dataset_root"] = str(self.data.dataset_root)
         payload["train"]["output_dir"] = str(self.train.output_dir)
@@ -236,6 +267,8 @@ class ExperimentConfig:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> ExperimentConfig:
+        """Build `ExperimentConfig` from mapping payload with extras passthrough."""
+
         payload = _as_plain_dict(mapping)
         if "data" not in payload:
             raise ValueError("Configuration mapping must include a `data` section.")
@@ -267,6 +300,8 @@ class ExperimentConfig:
 
     @classmethod
     def from_file(cls, path: str | Path) -> ExperimentConfig:
+        """Load experiment config from JSON/YAML file."""
+
         config_path = _coerce_path(path)
         suffix = config_path.suffix.lower()
         text = config_path.read_text(encoding="utf-8")
@@ -317,3 +352,4 @@ __all__ = [
     "TrainConfig",
     "build_timercd_base_config",
 ]
+

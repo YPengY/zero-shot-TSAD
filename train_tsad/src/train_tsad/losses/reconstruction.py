@@ -11,10 +11,14 @@ class MaskedReconstructionLoss(nn.Module):
     """Mean squared reconstruction loss for masked or full context recovery."""
 
     def __init__(self, *, use_mask_only: bool = True) -> None:
+        """Configure reconstruction objective over full or masked positions."""
+
         super().__init__()
         self.use_mask_only = use_mask_only
 
     def _masked_mse(self, prediction: Tensor, target: Tensor, mask: Tensor) -> Tensor:
+        """Compute MSE only on selected masked positions."""
+
         masked_prediction = prediction[mask]
         masked_target = target[mask]
         if masked_prediction.numel() == 0:
@@ -22,6 +26,8 @@ class MaskedReconstructionLoss(nn.Module):
         return F.mse_loss(masked_prediction, masked_target)
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
+        """Compute reconstruction loss and reconstruction-path diagnostics."""
+
         if batch.reconstruction_targets is None:
             raise ValueError("`batch.reconstruction_targets` is required for reconstruction loss.")
         if output.reconstruction is None:

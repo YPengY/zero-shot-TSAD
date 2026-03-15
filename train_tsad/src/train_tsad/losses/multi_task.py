@@ -31,6 +31,8 @@ class TimeRCDMultiTaskLoss(nn.Module):
         anomaly_weight: float = 1.0,
         reconstruction_weight: float = 0.2,
     ) -> None:
+        """Combine anomaly and reconstruction objectives with fixed weights."""
+
         super().__init__()
 
         if anomaly_weight <= 0:
@@ -45,6 +47,8 @@ class TimeRCDMultiTaskLoss(nn.Module):
 
     @classmethod
     def from_config(cls, config: LossConfig) -> TimeRCDMultiTaskLoss:
+        """Factory that builds loss modules from experiment config."""
+
         return cls(
             anomaly_loss=PatchAnomalyLoss(
                 pos_weight=config.anomaly_pos_weight,
@@ -56,6 +60,13 @@ class TimeRCDMultiTaskLoss(nn.Module):
         )
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
+        """Compute weighted multi-task loss and merged metric dictionary.
+
+        Behavior:
+        - Anomaly term is always computed.
+        - Reconstruction term is computed only when enabled and tensors exist.
+        """
+
         anomaly_output = self.anomaly_loss(batch, output)
         total_loss = anomaly_output.loss * self.anomaly_weight
 

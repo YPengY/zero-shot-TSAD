@@ -16,6 +16,8 @@ def _stack_required(
     name: str,
     expected_ndim: int,
 ) -> np.ndarray:
+    """Validate and stack required arrays into `[B, ...]`."""
+
     if not arrays:
         raise ValueError(f"`{name}` requires at least one array.")
 
@@ -41,6 +43,8 @@ def _stack_optional(
     name: str,
     expected_ndim: int,
 ) -> np.ndarray | None:
+    """Stack optional arrays only when all samples provide them."""
+
     present = [array is not None for array in arrays]
     if not any(present):
         return None
@@ -67,6 +71,15 @@ class ContextWindowCollator(CollatorProtocol):
     masking_transform: RandomPatchMaskingTransform | None = None
 
     def __call__(self, samples: Sequence[ContextWindowSample]) -> Batch:
+        """Collate window samples into one `Batch`.
+
+        Workflow:
+        1. Validate batch consistency (non-empty and single split).
+        2. Stack numpy arrays and convert to torch tensors.
+        3. Build optional reconstruction/masking targets.
+        4. Attach context bounds and shape metadata.
+        """
+
         if not samples:
             raise ValueError("`samples` must contain at least one context window.")
 
@@ -110,6 +123,7 @@ class ContextWindowCollator(CollatorProtocol):
         reconstruction_targets = inputs.clone() if self.include_reconstruction_targets else None
         mask_indices = None
         if self.masking_transform is not None:
+            # Masking transform keeps original inputs as reconstruction targets.
             masking_targets = self.masking_transform(inputs)
             reconstruction_targets = masking_targets.reconstruction_targets
             mask_indices = masking_targets.mask_indices

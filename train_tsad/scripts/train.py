@@ -29,6 +29,7 @@ from train_tsad.data import (  # noqa: E402
     SyntheticTsadDataset,
 )
 from train_tsad.losses import TimeRCDMultiTaskLoss  # noqa: E402
+from train_tsad.evaluation import PatchFeatureEvaluator, TimeRCDEvaluator  # noqa: E402
 from train_tsad.models import TimeRCDModel  # noqa: E402
 from train_tsad.training import (  # noqa: E402
     CheckpointManager,
@@ -39,10 +40,22 @@ from train_tsad.training import (  # noqa: E402
 
 
 def _resolve_path(path: Path, *, base_dir: Path) -> Path:
+    """Resolve relative paths against the project root.
+
+    Args:
+        path: User-provided path from config or CLI.
+        base_dir: Base directory used when `path` is relative.
+
+    Returns:
+        Absolute resolved path that can be used by loaders/checkpoint writers.
+    """
+
     return path if path.is_absolute() else (base_dir / path).resolve()
 
 
 def _set_global_seed(seed: int) -> None:
+    """Seed Python, NumPy, and Torch RNGs for reproducible runs."""
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -51,6 +64,14 @@ def _set_global_seed(seed: int) -> None:
 
 
 def _build_raw_dataset(config: ExperimentConfig, *, split: str):
+    """Create the raw dataset object for one split.
+
+    Workflow:
+    1. Resolve dataset root and split manifest to absolute paths.
+    2. Pick sharded/non-sharded dataset class from config.
+    3. Build the dataset instance without materializing samples yet.
+    """
+
     dataset_root = _resolve_path(config.data.dataset_root, base_dir=PROJECT_ROOT)
     manifest_path = config.data.manifest_path(split)
     manifest_path = _resolve_path(manifest_path, base_dir=PROJECT_ROOT)
@@ -72,6 +93,14 @@ def _build_window_loader(
     shuffle: bool,
     batch_size: int,
 ) -> tuple[ContextWindowDataset, DataLoader]:
+    """Build window dataset + dataloader for train/validation.
+
+    The function wires together:
+    - Sliding window slicing (`SlidingContextWindowizer`)
+    - Optional patch masking (only when reconstruction loss is enabled)
+    - Batch collation into `Batch` tensors
+    """
+
     windowizer = SlidingContextWindowizer(
         context_size=config.data.context_size,
         patch_size=config.data.patch_size,
@@ -107,31 +136,166 @@ def _build_window_loader(
 
 
 def _infer_fixed_num_features(*raw_datasets) -> int:
+    """Infer a single feature-channel count across datasets.
+
+    Returns:
+        The shared D in `[T, D]`.
+
+    Raises:
+        FileNotFoundError: No samples are available.
+        ValueError: Different samples contain different feature counts.
+    """
+
     feature_counts: set[int] = set()
+    sample_counts_by_feature: dict[int, int] = {}
+    example_ids_by_feature: dict[int, list[str]] = {}
     for raw_dataset in raw_datasets:
         if raw_dataset is None:
             continue
         for index in range(len(raw_dataset)):
-            feature_counts.add(int(raw_dataset[index].series.shape[1]))
+            sample = raw_dataset[index]
+            feature_count = int(sample.series.shape[1])
+            feature_counts.add(feature_count)
+            sample_counts_by_feature[feature_count] = sample_counts_by_feature.get(feature_count, 0) + 1
+            example_ids = example_ids_by_feature.setdefault(feature_count, [])
+            if len(example_ids) < 3:
+                example_ids.append(sample.sample_id)
 
     if not feature_counts:
         raise FileNotFoundError("Could not infer the number of feature channels from the datasets.")
     if len(feature_counts) != 1:
+        feature_summary = ", ".join(
+            f"{feature_count}D(count={sample_counts_by_feature[feature_count]}, "
+            f"examples={example_ids_by_feature[feature_count]})"
+            for feature_count in sorted(feature_counts)
+        )
         raise ValueError(
             "The current training pipeline requires a fixed number of feature channels per run. "
-            f"Found multiple values: {sorted(feature_counts)}."
+            f"Found multiple values: {sorted(feature_counts)}. "
+            f"Observed distribution: {feature_summary}. "
+            "If you are using synthetic_tsad, fix `num_series` to one value "
+            "(for example via `--num-series 6` or `num_series.min == num_series.max` in the raw config)."
         )
     return next(iter(feature_counts))
 
 
+def _estimate_patch_feature_label_stats(raw_dataset, *, config: ExperimentConfig) -> dict[str, float]:
+    """Estimate train-time patch-feature label balance from the raw training split."""
+
+    windowizer = SlidingContextWindowizer(
+        context_size=config.data.context_size,
+        patch_size=config.data.patch_size,
+        stride=config.data.stride,
+        pad_short_sequences=config.data.pad_short_sequences,
+        include_tail=config.data.include_tail,
+    )
+
+    positive_units = 0
+    total_units = 0
+    num_windows = 0
+    for sample_index in range(len(raw_dataset)):
+        sample = raw_dataset[sample_index]
+        for window in windowizer.transform(sample):
+            patch_labels = np.asarray(window.patch_labels, dtype=np.uint8)
+            positive_units += int(patch_labels.sum())
+            total_units += int(patch_labels.size)
+            num_windows += 1
+
+    if total_units <= 0:
+        raise ValueError("Unable to estimate patch-feature statistics from an empty training split.")
+
+    negative_units = total_units - positive_units
+    positive_rate = positive_units / total_units
+    return {
+        "num_windows": float(num_windows),
+        "num_patch_feature_units": float(total_units),
+        "num_positive_patch_feature_units": float(positive_units),
+        "num_negative_patch_feature_units": float(negative_units),
+        "patch_feature_positive_rate": float(positive_rate),
+    }
+
+
+def _resolve_anomaly_pos_weight(
+    config: ExperimentConfig,
+    *,
+    train_raw_dataset,
+) -> dict[str, float] | None:
+    """Resolve anomaly pos_weight from config, optionally auto-estimating it from train labels."""
+
+    configured = config.loss.anomaly_pos_weight
+    if configured is None:
+        print(
+            "Anomaly pos_weight is disabled (`null`). "
+            "Imbalanced patch-feature supervision may still collapse to all-negative predictions."
+        )
+        return None
+    if isinstance(configured, str):
+        if configured != "auto":
+            raise ValueError(
+                "`loss.anomaly_pos_weight` must be a positive float, null, or `auto`."
+            )
+        stats = _estimate_patch_feature_label_stats(train_raw_dataset, config=config)
+        positive_units = stats["num_positive_patch_feature_units"]
+        negative_units = stats["num_negative_patch_feature_units"]
+        if positive_units <= 0:
+            raise ValueError(
+                "Cannot auto-estimate `loss.anomaly_pos_weight` because the train split "
+                "contains zero positive patch-feature labels."
+            )
+        resolved = float(negative_units / positive_units)
+        config.loss.anomaly_pos_weight = resolved
+        config.extras["train_patch_feature_label_stats"] = stats
+        config.extras["resolved_anomaly_pos_weight"] = resolved
+        print(
+            "Auto anomaly_pos_weight resolved from train patch-feature labels: "
+            f"pos_weight={resolved:.6f}, positive_rate={stats['patch_feature_positive_rate']:.6f}, "
+            f"positives={int(positive_units)}, negatives={int(negative_units)}, "
+            f"windows={int(stats['num_windows'])}."
+        )
+        return stats
+
+    resolved = float(configured)
+    config.loss.anomaly_pos_weight = resolved
+    config.extras["resolved_anomaly_pos_weight"] = resolved
+    print(f"Using configured anomaly_pos_weight={resolved:.6f}.")
+    return None
+
+
 def _resolve_device(requested: str) -> torch.device:
+    """Resolve runtime device with a safe CUDA fallback."""
+
     if requested.startswith("cuda") and not torch.cuda.is_available():
         print("CUDA is unavailable. Falling back to CPU.")
         return torch.device("cpu")
     return torch.device(requested)
 
 
+def _build_validation_evaluator(config: ExperimentConfig):
+    """Build the validation-time evaluator used for checkpoint selection."""
+
+    if config.eval.task == "patch_feature":
+        return PatchFeatureEvaluator(
+            patch_size=config.data.patch_size,
+            patch_feature_score_aggregation=config.eval.patch_feature_score_aggregation,
+            threshold=config.eval.threshold,
+            threshold_search=config.eval.threshold_search,
+            threshold_search_metric=config.eval.threshold_search_metric,
+            report_per_feature=False,
+            report_per_sample=False,
+        )
+    return TimeRCDEvaluator(
+        patch_size=config.data.patch_size,
+        score_reduction=config.eval.score_reduction,
+        point_score_aggregation=config.eval.point_score_aggregation,
+        threshold=config.eval.threshold,
+        threshold_search=config.eval.threshold_search,
+        threshold_search_metric=config.eval.threshold_search_metric,
+    )
+
+
 def parse_args() -> argparse.Namespace:
+    """Parse train entrypoint CLI arguments."""
+
     default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_small.json"
     parser = argparse.ArgumentParser(description="Train the paper-aligned TimeRCD model.")
     parser.add_argument(
@@ -156,6 +320,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run end-to-end training from config loading to summary export.
+
+    Workflow:
+    1. Parse config and CLI overrides.
+    2. Build datasets/loaders and infer fixed model feature dimension.
+    3. Build model/loss/optimizer/scheduler/trainer.
+    4. Execute fitting and persist history + summary artifacts.
+    """
+
     args = parse_args()
     config = ExperimentConfig.from_file(args.config)
     if args.max_epochs is not None:
@@ -169,14 +342,22 @@ def main() -> None:
 
     _set_global_seed(config.train.seed)
 
+    # Training split is required.
     train_raw_dataset = _build_raw_dataset(config, split=config.data.split)
 
+    _resolve_anomaly_pos_weight(
+        config,
+        train_raw_dataset=train_raw_dataset,
+    )
+
+    # Validation split is optional. Missing validation keeps a train-only loop.
     val_raw_dataset = None
     try:
         val_raw_dataset = _build_raw_dataset(config, split=config.data.validation_split)
     except FileNotFoundError:
         print(f"Validation split `{config.data.validation_split}` not found. Training without validation.")
 
+    # Current model path assumes a fixed feature count across all samples.
     num_features = _infer_fixed_num_features(train_raw_dataset, val_raw_dataset)
 
     _, train_loader = _build_window_loader(
@@ -240,6 +421,13 @@ def main() -> None:
         validate_every_n_epochs=config.train.validate_every_n_epochs,
         early_stopping_patience=config.train.early_stopping_patience,
         config_payload=config.to_dict(),
+        validation_evaluator_factory=(
+            (lambda: _build_validation_evaluator(config))
+            if val_loader is not None
+            else None
+        ),
+        monitor_metric=config.eval.primary_metric if val_loader is not None else "total_loss",
+        monitor_mode=config.eval.primary_metric_mode if val_loader is not None else "min",
     )
 
     checkpoint_manager.save_json("history.json", result.history)

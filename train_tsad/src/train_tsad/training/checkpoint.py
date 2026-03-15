@@ -18,6 +18,8 @@ class CheckpointManager:
     output_dir: Path
 
     def __post_init__(self) -> None:
+        """Ensure checkpoint output directory exists."""
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def save_checkpoint(
@@ -31,6 +33,8 @@ class CheckpointManager:
         metrics: dict[str, float],
         config: dict[str, Any] | None = None,
     ) -> Path:
+        """Serialize one checkpoint bundle to disk."""
+
         checkpoint_path = self.output_dir / filename
         state = {
             "epoch": epoch,
@@ -53,6 +57,8 @@ class CheckpointManager:
         metrics: dict[str, float],
         config: dict[str, Any] | None = None,
     ) -> Path:
+        """Write/update the rolling latest checkpoint."""
+
         return self.save_checkpoint(
             filename="latest.pt",
             epoch=epoch,
@@ -73,6 +79,8 @@ class CheckpointManager:
         metrics: dict[str, float],
         config: dict[str, Any] | None = None,
     ) -> Path:
+        """Write/update the best-performing checkpoint."""
+
         return self.save_checkpoint(
             filename="best.pt",
             epoch=epoch,
@@ -84,6 +92,8 @@ class CheckpointManager:
         )
 
     def save_json(self, filename: str, payload: Any) -> Path:
+        """Persist auxiliary JSON artifact (history, summary, config snapshot)."""
+
         path = self.output_dir / filename
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return path
