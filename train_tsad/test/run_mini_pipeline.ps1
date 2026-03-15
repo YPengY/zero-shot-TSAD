@@ -1,8 +1,8 @@
 ﻿param(
     [string]$RunRoot = 'D:\tsad_runs\mini_run_002',
-    [int]$TrainSamples = 10000,
-    [int]$ValSamples = 1500,
-    [int]$TestSamples = 1500,
+    [int]$TrainSamples = 1000,
+    [int]$ValSamples = 150,
+    [int]$TestSamples = 150,
     [int]$NumSeries = 6,
     [int]$SequenceLengthMultiple = 2,
     [double]$AnomalySampleRatio = 1.0,

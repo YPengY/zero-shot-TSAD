@@ -23,6 +23,7 @@ from train_tsad.config import ExperimentConfig  # noqa: E402
 from train_tsad.data import (  # noqa: E402
     ContextWindowCollator,
     ContextWindowDataset,
+    DataQualityInspector,
     RandomPatchMaskingTransform,
     ShardedSyntheticTsadDataset,
     SlidingContextWindowizer,
@@ -293,6 +294,77 @@ def _build_validation_evaluator(config: ExperimentConfig):
     )
 
 
+
+def _default_inspection_splits(config: ExperimentConfig) -> list[str]:
+    """Return configured split order for optional data-quality inspection."""
+
+    ordered = [config.data.split, config.data.validation_split, config.data.test_split]
+    unique: list[str] = []
+    for split in ordered:
+        if split not in unique:
+            unique.append(split)
+    return unique
+
+
+def _run_data_quality_inspection(
+    config: ExperimentConfig,
+    *,
+    train_raw_dataset,
+    val_raw_dataset,
+    max_samples: int | None,
+    output_path: Path | None,
+) -> None:
+    """Run optional split-level data-quality diagnostics before model training."""
+
+    datasets_by_split: dict[str, object] = {
+        config.data.split: train_raw_dataset,
+    }
+    missing_splits: list[str] = []
+
+    if val_raw_dataset is not None:
+        datasets_by_split[config.data.validation_split] = val_raw_dataset
+
+    for split in _default_inspection_splits(config):
+        if split in datasets_by_split:
+            continue
+        try:
+            datasets_by_split[split] = _build_raw_dataset(config, split=split)
+        except FileNotFoundError:
+            missing_splits.append(split)
+
+    windowizer = SlidingContextWindowizer(
+        context_size=config.data.context_size,
+        patch_size=config.data.patch_size,
+        stride=config.data.stride,
+        pad_short_sequences=config.data.pad_short_sequences,
+        include_tail=config.data.include_tail,
+    )
+    inspector = DataQualityInspector(
+        windowizer=windowizer,
+        max_samples=max_samples,
+    )
+    report = inspector.inspect_many(
+        datasets_by_split,
+        expected_training_split=config.data.split,
+        missing_splits=missing_splits,
+    )
+
+    payload = report.to_dict()
+    output_json = json.dumps(payload, indent=2, ensure_ascii=False)
+
+    report_path = output_path or (config.train.output_dir / "data_quality_report.json")
+    report_path = _resolve_path(report_path, base_dir=PROJECT_ROOT)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(output_json, encoding="utf-8")
+
+    config.extras["data_quality_summary"] = payload["summary"]
+
+    print("Data quality inspection completed. Summary:")
+    print(json.dumps(payload["summary"], indent=2, ensure_ascii=False))
+    print(f"Data quality report written to: {report_path}")
+    print(output_json)
+
+
 def parse_args() -> argparse.Namespace:
     """Parse train entrypoint CLI arguments."""
 
@@ -315,6 +387,23 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional max epoch override.",
+    )
+    parser.add_argument(
+        "--inspect-data",
+        action="store_true",
+        help="Run split-level data quality inspection before training starts.",
+    )
+    parser.add_argument(
+        "--inspect-max-samples",
+        type=int,
+        default=None,
+        help="Optional cap on inspected samples per split during data inspection.",
+    )
+    parser.add_argument(
+        "--inspect-output",
+        type=Path,
+        default=None,
+        help="Optional path to save the data quality report JSON.",
     )
     return parser.parse_args()
 
@@ -345,17 +434,26 @@ def main() -> None:
     # Training split is required.
     train_raw_dataset = _build_raw_dataset(config, split=config.data.split)
 
-    _resolve_anomaly_pos_weight(
-        config,
-        train_raw_dataset=train_raw_dataset,
-    )
-
     # Validation split is optional. Missing validation keeps a train-only loop.
     val_raw_dataset = None
     try:
         val_raw_dataset = _build_raw_dataset(config, split=config.data.validation_split)
     except FileNotFoundError:
         print(f"Validation split `{config.data.validation_split}` not found. Training without validation.")
+
+    if args.inspect_data:
+        _run_data_quality_inspection(
+            config,
+            train_raw_dataset=train_raw_dataset,
+            val_raw_dataset=val_raw_dataset,
+            max_samples=args.inspect_max_samples,
+            output_path=args.inspect_output,
+        )
+
+    _resolve_anomaly_pos_weight(
+        config,
+        train_raw_dataset=train_raw_dataset,
+    )
 
     # Current model path assumes a fixed feature count across all samples.
     num_features = _infer_fixed_num_features(train_raw_dataset, val_raw_dataset)

@@ -1,0 +1,468 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TSAD Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" data-i18n="brand.eyebrow">TSAD Studio</p>
+          <h1 data-i18n="brand.title">Interactive Config and Sample Preview</h1>
+          <p class="subtle" data-i18n="brand.subtitle">
+            Isolated workspace for parameter editing, randomization, and in-memory visualization.
+          </p>
+        </div>
+        <div class="toolbar">
+          <button id="toggle-language" class="secondary" data-i18n="toolbar.lang">Language</button>
+          <button id="open-import-modal" class="secondary" data-i18n="toolbar.import">Import Config</button>
+          <button id="restore-defaults" class="secondary" data-i18n="toolbar.restore">Restore Defaults</button>
+          <button id="randomize-config" class="secondary" data-i18n="toolbar.randomize">Random Fill All</button>
+          <button id="preview-batch" class="secondary" data-i18n="toolbar.previewBatch">Preview Gallery</button>
+          <button id="preview-sample" class="primary" data-i18n="toolbar.preview">Preview Sample</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="config-panel">
+          <div class="panel-header">
+            <h2 data-i18n="config.title">Parameters</h2>
+            <p class="subtle" data-i18n="config.subtitle">
+              Edit every config field. Small text now explains the parameter instead of repeating the raw path.
+            </p>
+          </div>
+          <div id="status-banner" class="status hidden"></div>
+          <div id="config-form" class="form-tree"></div>
+        </aside>
+
+        <section class="preview-panel">
+          <div class="preview-header">
+            <div>
+              <h2 data-i18n="preview.title">Sample Preview</h2>
+              <p class="subtle" data-i18n="preview.subtitle">
+                Preview runs in memory and does not write files to outputs/.
+              </p>
+            </div>
+            <div id="summary-chips" class="summary-chips"></div>
+          </div>
+
+          <div class="preview-tabs">
+            <button class="tab active" data-tab="series" data-i18n="tabs.series">Series</button>
+            <button class="tab" data-tab="mask" data-i18n="tabs.mask">Mask</button>
+            <button class="tab" data-tab="dag" data-i18n="tabs.dag">DAG</button>
+            <button class="tab" data-tab="metadata" data-i18n="tabs.metadata">Metadata</button>
+          </div>
+
+          <div id="tab-series" class="tab-panel active">
+            <div class="series-layout">
+              <div class="series-main">
+                <div class="canvas-card hero-card">
+                  <div class="hero-header">
+                    <div class="hero-copy">
+                      <p class="hero-kicker" data-i18n="preview.heroEyebrow">Focused View</p>
+                      <h3 id="series-title">Final Observed</h3>
+                      <p id="series-subtitle" class="subtle compact"></p>
+                    </div>
+                    <div class="panel-controls panel-controls-hero">
+                      <label>
+                        <span data-i18n="preview.dataset">Dataset</span>
+                        <select id="dataset-select"></select>
+                      </label>
+                      <label>
+                        <span data-i18n="preview.maxNodes">Max Nodes</span>
+                        <select id="max-nodes-select">
+                          <option value="1">1</option>
+                          <option value="3">3</option>
+                          <option value="6" selected>6</option>
+                          <option value="12">12</option>
+                          <option value="20">20</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <div id="series-badges" class="hero-badges"></div>
+                  <canvas id="series-canvas" width="980" height="460"></canvas>
+                  <div id="series-footer" class="series-footer"></div>
+                </div>
+              </div>
+
+              <aside class="series-sidebar">
+                <section class="inspector-card inspector-card-primary">
+                  <div class="card-heading-row">
+                    <div>
+                      <p class="hero-kicker compact-kicker" data-i18n="preview.currentLayer">Current Layer</p>
+                      <h3 data-i18n="preview.layerSummary">Layer Summary</h3>
+                    </div>
+                    <span id="dataset-stage-pill" class="stage-pill"></span>
+                  </div>
+                  <div id="dataset-hint" class="dataset-hint"></div>
+                </section>
+
+                <section class="inspector-card">
+                  <div class="card-heading-row">
+                    <div>
+                      <p class="hero-kicker compact-kicker" data-i18n="preview.pipelineRail">Pipeline Inspector</p>
+                      <h3 data-i18n="preview.stageFlow">Stage Flow</h3>
+                    </div>
+                  </div>
+                  <div id="pipeline-rail" class="pipeline-rail"></div>
+                </section>
+
+                <section class="inspector-card">
+                  <div class="card-heading-row">
+                    <div>
+                      <p class="hero-kicker compact-kicker" data-i18n="preview.nodes">Node Filter</p>
+                      <h3 data-i18n="preview.nodeLegend">Interactive Legend</h3>
+                    </div>
+                    <div class="card-actions">
+                      <button id="reset-node-selection" class="ghost" type="button" data-i18n="preview.resetNodes">
+                        First N
+                      </button>
+                      <button id="select-all-nodes" class="ghost" type="button" data-i18n="preview.allNodes">All</button>
+                    </div>
+                  </div>
+                  <p class="subtle compact" data-i18n="preview.nodesHint">
+                    Choose which nodes are visible in the current chart.
+                  </p>
+                  <div id="node-selector" class="node-selector"></div>
+                </section>
+              </aside>
+            </div>
+          </div>
+
+          <div id="tab-mask" class="tab-panel">
+            <div class="panel-controls">
+              <p class="subtle" data-i18n="mask.subtitle">Binary point mask over time for selected nodes.</p>
+            </div>
+            <div class="canvas-card">
+              <canvas id="mask-canvas" width="980" height="260"></canvas>
+            </div>
+          </div>
+
+          <div id="tab-dag" class="tab-panel">
+            <div class="panel-controls">
+              <p class="subtle" data-i18n="dag.subtitle">Arrow direction is parent to child.</p>
+            </div>
+            <div class="canvas-card">
+              <svg id="dag-svg" viewBox="0 0 980 420" class="dag-svg"></svg>
+            </div>
+          </div>
+
+          <div id="tab-metadata" class="tab-panel">
+            <div class="metadata-layout">
+              <section class="inspector-card metadata-summary-card">
+                <div class="card-heading-row">
+                  <div>
+                    <h3 data-i18n="metadata.summaryTitle">Event Overview</h3>
+                    <p class="subtle" data-i18n="metadata.summarySubtitle">
+                      Counts are grouped by family, propagation mode, and target component.
+                    </p>
+                  </div>
+                </div>
+                <div id="event-summary" class="event-summary-grid"></div>
+              </section>
+
+              <div class="metadata-grid">
+                <section class="inspector-card metadata-events-card">
+                  <div class="card-heading-row">
+                    <div>
+                      <h3 data-i18n="metadata.eventsTitle">Events</h3>
+                      <p class="subtle" data-i18n="metadata.eventsSubtitle">
+                        Inspect realized event placement and sampled parameters.
+                      </p>
+                    </div>
+                  </div>
+                  <div id="events-table" class="event-list"></div>
+                </section>
+
+                <div class="metadata-side-column">
+                  <section class="inspector-card metadata-stages-card">
+                    <div class="card-heading-row">
+                      <div>
+                        <h3 data-i18n="metadata.stagesTitle">Structured Metadata</h3>
+                        <p class="subtle" data-i18n="metadata.stagesSubtitle">
+                          Inspect the stage-scoped records generated by the current preview sample.
+                        </p>
+                      </div>
+                    </div>
+                    <div id="metadata-stages" class="metadata-stage-grid"></div>
+                  </section>
+
+                  <details class="inspector-card metadata-raw-card">
+                    <summary class="metadata-raw-summary">
+                      <div>
+                        <h3 data-i18n="metadata.rawTitle">Raw Metadata</h3>
+                        <p class="subtle" data-i18n="metadata.rawHint">
+                          Open the raw JSON only when you need the full debug payload.
+                        </p>
+                      </div>
+                    </summary>
+                    <pre id="metadata-json" class="json-box"></pre>
+                  </details>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+      <section class="workflow-board">
+        <div class="workflow-column">
+          <section class="workflow-card">
+            <div class="card-heading-row">
+              <div>
+                <p class="hero-kicker compact-kicker" data-i18n="workbench.previewRail">Preview Workflow</p>
+                <h2 data-i18n="workbench.previewGalleryTitle">Preview Gallery</h2>
+                <p class="subtle" data-i18n="workbench.previewGallerySubtitle">
+                  Generate multiple in-memory samples from the current config, then open any one in the main preview panel.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-grid workflow-grid-compact">
+              <label class="field-lite">
+                <span data-i18n="workbench.previewCount">Preview Count</span>
+                <input id="wb-preview-count" type="number" min="1" max="12" value="6" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.previewSeed">Base Seed</span>
+                <input id="wb-preview-seed" type="number" value="0" />
+              </label>
+            </div>
+            <div class="workflow-actions">
+              <button id="wb-preview-generate" class="secondary" data-i18n="workbench.previewGenerate">Build Preview Gallery</button>
+            </div>
+            <div id="wb-preview-gallery" class="preview-gallery"></div>
+          </section>
+
+          <section class="workflow-card">
+            <div class="card-heading-row">
+              <div>
+                <p class="hero-kicker compact-kicker" data-i18n="workbench.generationRail">Dataset Workflow</p>
+                <h2 data-i18n="workbench.generateTitle">Generate And Pack Dataset</h2>
+                <p class="subtle" data-i18n="workbench.generateSubtitle">
+                  The current edited config will be written as the runtime synthetic config, then generated, packed, and linked to a train config.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-grid">
+              <label class="field-lite field-span-2">
+                <span data-i18n="workbench.runName">Run Name</span>
+                <input id="wb-run-name" type="text" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainSamples">Train Samples</span>
+                <input id="wb-train-samples" type="number" min="1" value="10000" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.valSamples">Val Samples</span>
+                <input id="wb-val-samples" type="number" min="1" value="1500" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.testSamples">Test Samples</span>
+                <input id="wb-test-samples" type="number" min="1" value="1500" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.shardSize">Samples Per Shard</span>
+                <input id="wb-samples-per-shard" type="number" min="1" value="128" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.seedBase">Seed Base</span>
+                <input id="wb-seed-base" type="number" value="100" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainTemplate">Train Template</span>
+                <select id="wb-train-template"></select>
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainDevice">Train Device</span>
+                <input id="wb-train-device" type="text" value="cuda" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainEpochs">Train Epochs</span>
+                <input id="wb-train-epochs" type="number" min="1" value="5" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainBatchSize">Train Batch Size</span>
+                <input id="wb-train-batch-size" type="number" min="1" value="16" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.evalBatchSize">Eval Batch Size</span>
+                <input id="wb-eval-batch-size" type="number" min="1" value="16" />
+              </label>
+              <label class="field-lite checkbox-lite field-span-2">
+                <input id="wb-overwrite-run" type="checkbox" checked />
+                <span data-i18n="workbench.overwriteRun">Overwrite existing run directory if present</span>
+              </label>
+            </div>
+            <div class="workflow-actions">
+              <button id="wb-generate-submit" class="primary" data-i18n="workbench.generateAction">Generate + Pack</button>
+              <button id="wb-load-run" class="secondary" data-i18n="workbench.loadRun">Load Existing Run</button>
+            </div>
+            <pre id="wb-run-summary" class="json-box compact-box"></pre>
+          </section>
+        </div>
+
+        <div class="workflow-column">
+          <section class="workflow-card">
+            <div class="card-heading-row">
+              <div>
+                <p class="hero-kicker compact-kicker" data-i18n="workbench.datasetRail">Dataset Inspector</p>
+                <h2 data-i18n="workbench.datasetTitle">Packed Sample And Window Viewer</h2>
+                <p class="subtle" data-i18n="workbench.datasetSubtitle">
+                  Browse packed samples, inspect sequence slices, and visualize the exact training windows and patch labels.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-grid">
+              <label class="field-lite field-span-2">
+                <span data-i18n="workbench.runPath">Run Or Packed Root</span>
+                <input id="wb-run-path" type="text" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.split">Split</span>
+                <select id="wb-split-select">
+                  <option value="train">train</option>
+                  <option value="val">val</option>
+                  <option value="test">test</option>
+                </select>
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.sample">Sample</span>
+                <select id="wb-sample-select"></select>
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.feature">Feature</span>
+                <input id="wb-feature-index" type="number" min="0" value="0" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.sliceStart">Slice Start</span>
+                <input id="wb-slice-start" type="number" min="0" value="0" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.sliceEnd">Slice End</span>
+                <input id="wb-slice-end" type="number" min="0" value="0" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.contextSize">Context Size</span>
+                <input id="wb-context-size" type="number" min="1" value="512" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.stride">Stride</span>
+                <input id="wb-stride" type="number" min="1" value="256" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.patchSize">Patch Size</span>
+                <input id="wb-patch-size" type="number" min="1" value="16" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.windowIndex">Window Index</span>
+                <input id="wb-window-index" type="number" min="0" value="0" />
+              </label>
+            </div>
+            <div class="workflow-actions">
+              <button id="wb-load-samples" class="secondary" data-i18n="workbench.loadSamples">Load Samples</button>
+              <button id="wb-preview-packed-sample" class="secondary" data-i18n="workbench.previewPackedSample">Preview Sample Slice</button>
+              <button id="wb-preview-window" class="secondary" data-i18n="workbench.previewWindow">Preview Window</button>
+            </div>
+            <div class="dataset-stats" id="wb-sample-stats"></div>
+            <div class="canvas-card compact-canvas-card">
+              <h3 data-i18n="workbench.sampleCanvasTitle">Packed Sample Slice</h3>
+              <canvas id="wb-sample-canvas" width="980" height="260"></canvas>
+            </div>
+            <div class="canvas-card compact-canvas-card">
+              <h3 data-i18n="workbench.windowCanvasTitle">Training Window</h3>
+              <canvas id="wb-window-canvas" width="980" height="260"></canvas>
+            </div>
+            <div class="canvas-card compact-canvas-card">
+              <h3 data-i18n="workbench.patchCanvasTitle">Patch Labels</h3>
+              <canvas id="wb-patch-canvas" width="980" height="160"></canvas>
+            </div>
+            <pre id="wb-dataset-json" class="json-box compact-box"></pre>
+          </section>
+
+          <section class="workflow-card">
+            <div class="card-heading-row">
+              <div>
+                <p class="hero-kicker compact-kicker" data-i18n="workbench.trainingRail">Training Monitor</p>
+                <h2 data-i18n="workbench.trainingTitle">Launch Training And Monitor Progress</h2>
+                <p class="subtle" data-i18n="workbench.trainingSubtitle">
+                  Start training from the generated config, stream logs, and refresh saved metrics and quality reports in place.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-grid">
+              <label class="field-lite field-span-2">
+                <span data-i18n="workbench.trainConfigPath">Train Config Path</span>
+                <input id="wb-train-config-path" type="text" />
+              </label>
+              <label class="field-lite field-span-2">
+                <span data-i18n="workbench.trainOutputDir">Train Output Dir</span>
+                <input id="wb-train-output-dir" type="text" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainDeviceOverride">Device Override</span>
+                <input id="wb-train-device-override" type="text" value="cuda" />
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.trainEpochOverride">Epoch Override</span>
+                <input id="wb-train-epoch-override" type="number" min="1" value="5" />
+              </label>
+              <label class="field-lite checkbox-lite field-span-2">
+                <input id="wb-inspect-data" type="checkbox" checked />
+                <span data-i18n="workbench.inspectData">Run data quality inspection before training</span>
+              </label>
+              <label class="field-lite">
+                <span data-i18n="workbench.inspectMaxSamples">Inspect Max Samples</span>
+                <input id="wb-inspect-max-samples" type="number" min="1" value="5000" />
+              </label>
+            </div>
+            <div class="workflow-actions">
+              <button id="wb-start-training" class="primary" data-i18n="workbench.startTraining">Start Training</button>
+              <button id="wb-refresh-training" class="secondary" data-i18n="workbench.refreshTraining">Refresh Metrics</button>
+            </div>
+            <div id="wb-training-status" class="dataset-stats"></div>
+            <div class="canvas-card compact-canvas-card">
+              <h3 data-i18n="workbench.lossCanvasTitle">Loss Curve</h3>
+              <canvas id="wb-loss-canvas" width="980" height="220"></canvas>
+            </div>
+            <div class="canvas-card compact-canvas-card">
+              <h3 data-i18n="workbench.metricCanvasTitle">Validation Curve</h3>
+              <canvas id="wb-metric-canvas" width="980" height="220"></canvas>
+            </div>
+            <pre id="wb-training-summary" class="json-box compact-box"></pre>
+            <pre id="wb-training-log" class="json-box compact-box log-box"></pre>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <div id="import-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+        <div class="modal-header">
+          <div>
+            <h2 id="import-modal-title" data-i18n="import.title">Import Config</h2>
+            <p class="subtle" data-i18n="import.subtitle">
+              Paste a JSON or YAML config. The app validates the formal schema and fills missing fields from defaults.
+            </p>
+            <p class="schema-note" data-i18n="import.note">
+              Runtime and Studio import both accept only the formal schema. Missing fields are filled from defaults after validation.
+            </p>
+          </div>
+          <button id="close-import-modal" class="secondary modal-close" data-i18n="import.close">Close</button>
+        </div>
+        <textarea id="import-textarea" class="import-textarea" spellcheck="false"></textarea>
+        <div class="modal-actions">
+          <button id="apply-import-config" class="primary" data-i18n="import.apply">Apply Imported Config</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
+
+
+
