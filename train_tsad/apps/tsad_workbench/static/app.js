@@ -7,6 +7,89 @@
     "toolbar.restore": "Restore Defaults",
     "toolbar.randomize": "Random Fill All",
     "toolbar.preview": "Preview Sample",
+    "toolbar.previewBatch": "Preview Gallery",
+    "workbench.previewRail": "Preview Workflow",
+    "workbench.previewGalleryTitle": "Preview Gallery",
+    "workbench.previewGallerySubtitle": "Generate multiple in-memory samples from the current config, then open any one in the main preview panel.",
+    "workbench.previewCount": "Preview Count",
+    "workbench.previewSeed": "Base Seed",
+    "workbench.previewGenerate": "Build Preview Gallery",
+    "workbench.generationRail": "Dataset Workflow",
+    "workbench.generateTitle": "Generate And Pack Dataset",
+    "workbench.generateSubtitle": "The current edited config will be written as the runtime synthetic config, then generated, packed, and linked to a train config.",
+    "workbench.runName": "Run Name",
+    "workbench.trainSamples": "Train Samples",
+    "workbench.valSamples": "Val Samples",
+    "workbench.testSamples": "Test Samples",
+    "workbench.shardSize": "Samples Per Shard",
+    "workbench.seedBase": "Seed Base",
+    "workbench.trainTemplate": "Train Template",
+    "workbench.trainDevice": "Train Device",
+    "workbench.trainEpochs": "Train Epochs",
+    "workbench.trainBatchSize": "Train Batch Size",
+    "workbench.evalBatchSize": "Eval Batch Size",
+    "workbench.overwriteRun": "Overwrite existing run directory if present",
+    "workbench.generateAction": "Generate + Pack",
+    "workbench.loadRun": "Load Existing Run",
+    "workbench.datasetRail": "Dataset Inspector",
+    "workbench.datasetTitle": "Packed Sample And Window Viewer",
+    "workbench.datasetSubtitle": "Browse packed samples, inspect sequence slices, and visualize the exact training windows and patch labels.",
+    "workbench.runPath": "Run Or Packed Root",
+    "workbench.split": "Split",
+    "workbench.sample": "Sample",
+    "workbench.feature": "Feature",
+    "workbench.sliceStart": "Slice Start",
+    "workbench.sliceEnd": "Slice End",
+    "workbench.contextSize": "Context Size",
+    "workbench.stride": "Stride",
+    "workbench.patchSize": "Patch Size",
+    "workbench.windowIndex": "Window Index",
+    "workbench.loadSamples": "Load Samples",
+    "workbench.previewPackedSample": "Preview Sample Slice",
+    "workbench.previewWindow": "Preview Window",
+    "workbench.sampleCanvasTitle": "Packed Sample Slice",
+    "workbench.windowCanvasTitle": "Training Window",
+    "workbench.patchCanvasTitle": "Patch Labels",
+    "workbench.trainingRail": "Training Monitor",
+    "workbench.trainingTitle": "Launch Training And Monitor Progress",
+    "workbench.trainingSubtitle": "Start training from the generated config, stream logs, and refresh saved metrics and quality reports in place.",
+    "workbench.trainConfigPath": "Train Config Path",
+    "workbench.trainOutputDir": "Train Output Dir",
+    "workbench.trainDeviceOverride": "Device Override",
+    "workbench.trainEpochOverride": "Epoch Override",
+    "workbench.inspectData": "Run data quality inspection before training",
+    "workbench.inspectMaxSamples": "Inspect Max Samples",
+    "workbench.startTraining": "Start Training",
+    "workbench.refreshTraining": "Refresh Metrics",
+    "workbench.lossCanvasTitle": "Loss Curve",
+    "workbench.metricCanvasTitle": "Validation Curve",
+    "workbench.galleryEmpty": "Build a preview gallery to compare multiple sampled sequences.",
+    "workbench.samplesEmpty": "Load a run and split to browse packed samples.",
+    "workbench.trainingIdle": "Training has not started yet.",
+    "workbench.runLoaded": "Run metadata loaded.",
+    "workbench.galleryLoaded": "Preview gallery updated.",
+    "workbench.sampleLoaded": "Packed sample preview updated.",
+    "workbench.windowLoaded": "Training window preview updated.",
+    "workbench.trainingStarted": "Training job started.",
+    "workbench.generationStarted": "Dataset generation job started.",
+    "workbench.error.missingTrainConfig": "Missing training config path.",
+    "workbench.label.seed": "seed",
+    "workbench.label.events": "events",
+    "workbench.label.local": "local",
+    "workbench.label.seasonal": "seasonal",
+    "workbench.label.length": "len",
+    "workbench.label.lengthShort": "L",
+    "workbench.label.seriesShort": "D",
+    "workbench.label.feature": "feat",
+    "workbench.label.ratio": "ratio",
+    "workbench.label.windows": "windows",
+    "workbench.label.window": "window",
+    "workbench.label.effective": "effective",
+    "workbench.label.patches": "patches",
+    "workbench.label.job": "job",
+    "workbench.label.status": "status",
+    "workbench.label.started": "started",
+    "workbench.label.finished": "finished",
     "toolbar.lang": "中文",
     "config.title": "Parameters",
     "config.subtitle": "Edit every config field. Small text now explains the parameter instead of repeating the raw path.",
@@ -26,6 +109,7 @@
     "preview.layerSummary": "Layer Summary",
     "preview.stageFlow": "Stage Flow",
     "preview.nodeLegend": "Interactive Legend",
+    "preview.shadedWindows": "Shaded windows",
     "preview.resetNodes": "First N",
     "preview.allNodes": "All",
     "mask.subtitle": "Binary point mask over time for selected nodes.",
@@ -126,7 +210,152 @@
   zh: {}
 };
 
-const TOKEN_LABELS = { en: {}, zh: {} };
+const TOKEN_LABELS = {
+  en: {
+    none: "None",
+    sine: "Sine",
+    square: "Square",
+    triangle: "Triangle",
+    wavelet: "Wavelet",
+    increase: "Increase",
+    decrease: "Decrease",
+    keep_steady: "Keep Steady",
+    multiple: "Multiple",
+    arima: "ARIMA",
+    low: "Low",
+    high: "High",
+    almost_none: "Almost None",
+    moderate: "Moderate",
+    local: "Local",
+    seasonal: "Seasonal",
+    observed: "Observed",
+    seasonality: "Seasonality",
+    baseline: "Baseline",
+    endogenous: "Endogenous",
+    exogenous: "Exogenous",
+    morlet: "Morlet",
+    ricker: "Ricker",
+    haar: "Haar",
+    gaus: "Gaussian",
+    mexh: "Mexican Hat",
+    shan: "Shannon",
+    uniform: "Uniform",
+    seasonal_eligible: "Seasonal Eligible",
+    upward_spike: "Upward Spike",
+    downward_spike: "Downward Spike",
+    continuous_upward_spikes: "Continuous Upward Spikes",
+    continuous_downward_spikes: "Continuous Downward Spikes",
+    wide_upward_spike: "Wide Upward Spike",
+    wide_downward_spike: "Wide Downward Spike",
+    outlier: "Outlier",
+    sudden_increase: "Sudden Increase",
+    sudden_decrease: "Sudden Decrease",
+    convex_plateau: "Convex Plateau",
+    concave_plateau: "Concave Plateau",
+    plateau: "Plateau",
+    rapid_rise_slow_decline: "Rapid Rise -> Slow Decline",
+    slow_rise_rapid_decline: "Slow Rise -> Rapid Decline",
+    rapid_decline_slow_rise: "Rapid Decline -> Slow Rise",
+    slow_decline_rapid_rise: "Slow Decline -> Rapid Rise",
+    decrease_after_upward_spike: "Decrease After Upward Spike",
+    increase_after_downward_spike: "Increase After Downward Spike",
+    increase_after_upward_spike: "Increase After Upward Spike",
+    decrease_after_downward_spike: "Decrease After Downward Spike",
+    shake: "Shake",
+    waveform_inversion: "Waveform Inversion",
+    amplitude_scaling: "Amplitude Scaling",
+    frequency_change: "Frequency Change",
+    phase_shift: "Phase Shift",
+    noise_injection: "Noise Injection",
+    waveform_change: "Waveform Change",
+    add_harmonic: "Add Harmonic",
+    remove_harmonic: "Remove Harmonic",
+    modify_harmonic_phase: "Modify Harmonic Phase",
+    modify_modulation_depth: "Modify Modulation Depth",
+    modify_modulation_frequency: "Modify Modulation Frequency",
+    modify_modulation_phase: "Modify Modulation Phase",
+    pulse_shift: "Pulse Shift",
+    pulse_width_modulation: "Pulse Width Modulation",
+    wavelet_family_change: "Wavelet Family Change",
+    wavelet_scale_change: "Wavelet Scale Change",
+    wavelet_shift_change: "Wavelet Shift Change",
+    wavelet_amplitude_change: "Wavelet Amplitude Change",
+    add_wavelet: "Add Wavelet",
+    remove_wavelet: "Remove Wavelet",
+  },
+  zh: {
+    none: "无",
+    sine: "正弦",
+    square: "方波",
+    triangle: "三角波",
+    wavelet: "小波",
+    increase: "上升",
+    decrease: "下降",
+    keep_steady: "平稳",
+    multiple: "多段",
+    arima: "ARIMA",
+    low: "低频",
+    high: "高频",
+    almost_none: "几乎无噪声",
+    moderate: "中等",
+    local: "局部",
+    seasonal: "季节",
+    observed: "观测层",
+    seasonality: "季节组件",
+    baseline: "基线层",
+    endogenous: "内生",
+    exogenous: "外生",
+    morlet: "Morlet",
+    ricker: "Ricker",
+    haar: "Haar",
+    gaus: "高斯",
+    mexh: "墨西哥帽",
+    shan: "Shannon",
+    uniform: "均匀",
+    seasonal_eligible: "季节有效节点",
+    upward_spike: "上升尖峰",
+    downward_spike: "下降尖峰",
+    continuous_upward_spikes: "连续上升尖峰",
+    continuous_downward_spikes: "连续下降尖峰",
+    wide_upward_spike: "宽上升尖峰",
+    wide_downward_spike: "宽下降尖峰",
+    outlier: "异常点",
+    sudden_increase: "突增",
+    sudden_decrease: "突降",
+    convex_plateau: "凸平台",
+    concave_plateau: "凹平台",
+    plateau: "平台",
+    rapid_rise_slow_decline: "快升慢降",
+    slow_rise_rapid_decline: "慢升快降",
+    rapid_decline_slow_rise: "快降慢升",
+    slow_decline_rapid_rise: "慢降快升",
+    decrease_after_upward_spike: "上升尖峰后下降",
+    increase_after_downward_spike: "下降尖峰后上升",
+    increase_after_upward_spike: "上升尖峰后上升",
+    decrease_after_downward_spike: "下降尖峰后下降",
+    shake: "抖动",
+    waveform_inversion: "波形反转",
+    amplitude_scaling: "幅值缩放",
+    frequency_change: "频率变化",
+    phase_shift: "相位偏移",
+    noise_injection: "噪声注入",
+    waveform_change: "波形变换",
+    add_harmonic: "添加谐波",
+    remove_harmonic: "移除谐波",
+    modify_harmonic_phase: "修改谐波相位",
+    modify_modulation_depth: "修改调制深度",
+    modify_modulation_frequency: "修改调制频率",
+    modify_modulation_phase: "修改调制相位",
+    pulse_shift: "脉冲平移",
+    pulse_width_modulation: "脉宽调制",
+    wavelet_family_change: "小波族变化",
+    wavelet_scale_change: "小波尺度变化",
+    wavelet_shift_change: "小波平移变化",
+    wavelet_amplitude_change: "小波幅值变化",
+    add_wavelet: "添加小波",
+    remove_wavelet: "移除小波",
+  },
+};
 
 const DATASET_LABELS = {
   en: {
@@ -140,19 +369,31 @@ const DATASET_LABELS = {
     stage1_baseline: "Stage1 Baseline",
     stage1_trend: "Stage1 Trend",
     stage1_seasonality: "Stage1 Seasonality",
-    stage1_noise: "Stage1 Noise"
+    stage1_noise: "Stage1 Noise",
   },
-  zh: {}
+  zh: {
+    observed: "最终观测",
+    final_anomaly_delta: "最终观测 - Stage2 正常参考",
+    stage2_normal: "Stage2 正常参考",
+    stage2_causal_effect: "Stage2 正常参考 - Stage1 基线",
+    stage3_pre_causal_local_delta: "因果前局部异常增量",
+    stage3_post_causal_local_delta: "因果后局部异常增量",
+    stage3_seasonal_delta: "季节异常增量",
+    stage1_baseline: "Stage1 基线",
+    stage1_trend: "Stage1 趋势",
+    stage1_seasonality: "Stage1 季节性",
+    stage1_noise: "Stage1 噪声",
+  },
 };
 
 const DATASET_GROUP_LABELS = {
   en: { Final: "Final", Causal: "Causal", Local: "Local", Seasonal: "Seasonal", Stage1: "Stage 1" },
-  zh: {}
+  zh: { Final: "最终输出", Causal: "因果", Local: "局部异常", Seasonal: "季节异常", Stage1: "阶段 1" },
 };
 
 const DATASET_KIND_LABELS = {
   en: { signal: "Signal", delta: "Delta", component: "Component" },
-  zh: {}
+  zh: { signal: "信号", delta: "增量", component: "组件" },
 };
 const state = {
   defaults: null,
@@ -236,6 +477,7 @@ async function init() {
   applyLocale();
   renderForm();
   clearPreview();
+  initWorkbench(payload.workbench ?? {});
   updateToolbarState();
 }
 
@@ -450,6 +692,73 @@ function applyLocale() {
   dom.toggleLanguage.textContent = t("toolbar.lang");
   dom.importTextarea.placeholder = t("import.placeholder");
   document.documentElement.lang = state.locale === "zh" ? "zh-CN" : "en";
+  refreshWorkbenchLocale();
+}
+
+function refreshWorkbenchLocale() {
+  if (!workbenchDom?.previewGallery) {
+    return;
+  }
+  renderPreviewGallery();
+  renderWorkbenchInspectorState();
+  if (!workbenchState.sampleList.length && workbenchState.activeInspector == null) {
+    workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
+  }
+  if (!workbenchState.polling.train && !workbenchState.currentSample && !workbenchState.currentWindow) {
+    workbenchDom.trainingSummary.textContent = t("workbench.trainingIdle");
+    workbenchDom.trainingLog.textContent = t("workbench.trainingIdle");
+  }
+}
+
+function renderWorkbenchInspectorState() {
+  if (workbenchState.activeInspector === "window" && workbenchState.currentWindow) {
+    renderSampleStats(buildWindowStats(workbenchState.currentWindow));
+    setWorkbenchWarning(buildPatchAlignmentWarning(workbenchState.currentWindow));
+    return;
+  }
+  if (workbenchState.activeInspector === "sample" && workbenchState.currentSample) {
+    renderSampleStats(buildSampleStats(workbenchState.currentSample));
+    setWorkbenchWarning("");
+    return;
+  }
+  renderSampleStats([]);
+  setWorkbenchWarning("");
+}
+
+function setWorkbenchWarning(message) {
+  const text = String(message ?? "").trim();
+  workbenchDom.datasetWarning.textContent = text;
+  workbenchDom.datasetWarning.classList.toggle("hidden", text.length === 0);
+}
+
+function clearWorkbenchInspectorState({ clearJson = false } = {}) {
+  workbenchState.currentSample = null;
+  workbenchState.currentWindow = null;
+  workbenchState.activeInspector = null;
+  renderWorkbenchInspectorState();
+  clearCanvas(workbenchDom.sampleCanvas);
+  clearCanvas(workbenchDom.windowCanvas);
+  clearCanvas(workbenchDom.patchCanvas);
+  if (clearJson) {
+    workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
+  }
+}
+
+function buildPatchAlignmentWarning(payload) {
+  if (!payload?.patch_alignment_warning) {
+    return "";
+  }
+  return localizeText(
+    `Patch labels only cover complete patches because context_size (${payload.context_size}) is not divisible by patch_size (${payload.patch_size}).`,
+    `由于 context_size (${payload.context_size}) 不能被 patch_size (${payload.patch_size}) 整除，Patch 标签只覆盖完整 patch，末尾残余步长不会计入标签。`,
+  );
+}
+
+function buildOverwriteConfirmMessage(runName) {
+  if (state.locale === "zh") {
+    return `已启用覆盖。如果运行目录已存在，将删除其中已有内容。确认继续${runName ? `：${runName}` : ""}？`;
+  }
+  return `Overwrite is enabled. If this run already exists, its directory will be deleted. Continue${runName ? ` with ${runName}` : ""}?`;
 }
 
 function resetNodeSelection() {
@@ -1372,22 +1681,25 @@ function commitNumericInput(input, path, kind) {
 function validateNumericValue(path, value, kind) {
   const label = getLabel(path);
   if (!Number.isFinite(value)) {
-    return `Invalid numeric value for ${label}.`;
+    return localizeText(`Invalid numeric value for ${label}.`, `${label} 的数值无效。`);
   }
   if (kind === "int" && !Number.isInteger(value)) {
-    return `Expected an integer for ${label}.`;
+    return localizeText(`Expected an integer for ${label}.`, `${label} 需要输入整数。`);
   }
 
   const numericMeta = state.ui.numericBounds[path];
   if (numericMeta && (value < numericMeta.min || value > numericMeta.max)) {
-    return `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`;
+    return localizeText(
+      `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`,
+      `${label} 必须在 ${numericMeta.min} 到 ${numericMeta.max} 之间。`,
+    );
   }
 
   if (path.endsWith(".min")) {
     const basePath = path.slice(0, -4);
     const baseLabel = getLabel(basePath);
     if (value > getAtPath(state.config, `${basePath}.max`)) {
-      return `Min cannot exceed max for ${baseLabel}.`;
+      return localizeText(`Min cannot exceed max for ${baseLabel}.`, `${baseLabel} 的最小值不能大于最大值。`);
     }
   }
 
@@ -1395,7 +1707,7 @@ function validateNumericValue(path, value, kind) {
     const basePath = path.slice(0, -4);
     const baseLabel = getLabel(basePath);
     if (value < getAtPath(state.config, `${basePath}.min`)) {
-      return `Max cannot be smaller than min for ${baseLabel}.`;
+      return localizeText(`Max cannot be smaller than min for ${baseLabel}.`, `${baseLabel} 的最大值不能小于最小值。`);
     }
   }
   return null;
@@ -1513,28 +1825,28 @@ function describeCurrentValue(path) {
 
   if (Array.isArray(value)) {
     if (value.length > 0 && value.every((item) => typeof item === "string")) {
-      return `Selectable list for ${label}.`;
+      return localizeText(`Selectable list for ${label}.`, `${label} 的可选列表。`);
     }
-    return `List setting for ${label}.`;
+    return localizeText(`List setting for ${label}.`, `${label} 的列表设置。`);
   }
   if (value && typeof value === "object") {
     const keys = Object.keys(value);
     if (keys.length === 2 && keys.includes("min") && keys.includes("max")) {
-      return `Numeric range for ${label}.`;
+      return localizeText(`Numeric range for ${label}.`, `${label} 的数值范围。`);
     }
     if (path.includes(".per_type.")) {
-      return `Per-type settings for ${label}.`;
+      return localizeText(`Per-type settings for ${label}.`, `${label} 的逐类型设置。`);
     }
-    return `Parameter group for ${label}.`;
+    return localizeText(`Parameter group for ${label}.`, `${label} 的参数组。`);
   }
   if (typeof value === "boolean") {
-    return `Toggle for ${label}.`;
+    return localizeText(`Toggle for ${label}.`, `${label} 的开关。`);
   }
   if (typeof value === "number") {
-    return `Numeric setting for ${label}.`;
+    return localizeText(`Numeric setting for ${label}.`, `${label} 的数值设置。`);
   }
   if (typeof value === "string") {
-    return `Categorical option for ${label}.`;
+    return localizeText(`Categorical option for ${label}.`, `${label} 的类别选项。`);
   }
   return label;
 }
@@ -1588,8 +1900,12 @@ function formatCodeLabel(value) {
     .join(" ");
 }
 
+function localizeText(enText, zhText) {
+  return state.locale === "zh" ? zhText : enText;
+}
+
 function buildValueRequiredMessage(label) {
-  return `Value required for ${label}.`;
+  return localizeText(`Value required for ${label}.`, `${label} 不能为空。`);
 }
 
 function t(key) {
@@ -1647,77 +1963,6 @@ function deepClone(value) {
 init().catch((error) => {
   console.error(error);
   setStatus(error.message ?? t("status.loadFailed"), "error");
-});
-
-
-Object.assign(LOCALE_TEXT.en, {
-  "brand.title": "TSAD Workbench",
-  "brand.subtitle": "Full config editing, in-memory preview gallery, packed dataset inspection, and training monitoring in one workspace.",
-  "toolbar.previewBatch": "Preview Gallery",
-  "workbench.previewRail": "Preview Workflow",
-  "workbench.previewGalleryTitle": "Preview Gallery",
-  "workbench.previewGallerySubtitle": "Generate multiple in-memory samples from the current config, then open any one in the main preview panel.",
-  "workbench.previewCount": "Preview Count",
-  "workbench.previewSeed": "Base Seed",
-  "workbench.previewGenerate": "Build Preview Gallery",
-  "workbench.generationRail": "Dataset Workflow",
-  "workbench.generateTitle": "Generate And Pack Dataset",
-  "workbench.generateSubtitle": "The current edited config will be written as the runtime synthetic config, then generated, packed, and linked to a train config.",
-  "workbench.runName": "Run Name",
-  "workbench.trainSamples": "Train Samples",
-  "workbench.valSamples": "Val Samples",
-  "workbench.testSamples": "Test Samples",
-  "workbench.shardSize": "Samples Per Shard",
-  "workbench.seedBase": "Seed Base",
-  "workbench.trainTemplate": "Train Template",
-  "workbench.trainDevice": "Train Device",
-  "workbench.trainEpochs": "Train Epochs",
-  "workbench.trainBatchSize": "Train Batch Size",
-  "workbench.evalBatchSize": "Eval Batch Size",
-  "workbench.overwriteRun": "Overwrite existing run directory if present",
-  "workbench.generateAction": "Generate + Pack",
-  "workbench.loadRun": "Load Existing Run",
-  "workbench.datasetRail": "Dataset Inspector",
-  "workbench.datasetTitle": "Packed Sample And Window Viewer",
-  "workbench.datasetSubtitle": "Browse packed samples, inspect sequence slices, and visualize the exact training windows and patch labels.",
-  "workbench.runPath": "Run Or Packed Root",
-  "workbench.split": "Split",
-  "workbench.sample": "Sample",
-  "workbench.feature": "Feature",
-  "workbench.sliceStart": "Slice Start",
-  "workbench.sliceEnd": "Slice End",
-  "workbench.contextSize": "Context Size",
-  "workbench.stride": "Stride",
-  "workbench.patchSize": "Patch Size",
-  "workbench.windowIndex": "Window Index",
-  "workbench.loadSamples": "Load Samples",
-  "workbench.previewPackedSample": "Preview Sample Slice",
-  "workbench.previewWindow": "Preview Window",
-  "workbench.sampleCanvasTitle": "Packed Sample Slice",
-  "workbench.windowCanvasTitle": "Training Window",
-  "workbench.patchCanvasTitle": "Patch Labels",
-  "workbench.trainingRail": "Training Monitor",
-  "workbench.trainingTitle": "Launch Training And Monitor Progress",
-  "workbench.trainingSubtitle": "Start training from the generated config, stream logs, and refresh saved metrics and quality reports in place.",
-  "workbench.trainConfigPath": "Train Config Path",
-  "workbench.trainOutputDir": "Train Output Dir",
-  "workbench.trainDeviceOverride": "Device Override",
-  "workbench.trainEpochOverride": "Epoch Override",
-  "workbench.inspectData": "Run data quality inspection before training",
-  "workbench.inspectMaxSamples": "Inspect Max Samples",
-  "workbench.startTraining": "Start Training",
-  "workbench.refreshTraining": "Refresh Metrics",
-  "workbench.lossCanvasTitle": "Loss Curve",
-  "workbench.metricCanvasTitle": "Validation Curve",
-  "workbench.galleryEmpty": "Build a preview gallery to compare multiple sampled sequences.",
-  "workbench.samplesEmpty": "Load a run and split to browse packed samples.",
-  "workbench.trainingIdle": "Training has not started yet.",
-  "workbench.runLoaded": "Run metadata loaded.",
-  "workbench.galleryLoaded": "Preview gallery updated.",
-  "workbench.sampleLoaded": "Packed sample preview updated.",
-  "workbench.windowLoaded": "Training window preview updated.",
-  "workbench.trainingStarted": "Training job started.",
-  "workbench.generationStarted": "Dataset generation job started."
 });
 
 const zhOverrides = {
@@ -1827,10 +2072,85 @@ const zhOverrides = {
   "workbench.sampleLoaded": "样本切片预览已更新。",
   "workbench.windowLoaded": "训练窗口预览已更新。",
   "workbench.trainingStarted": "训练任务已启动。",
-  "workbench.generationStarted": "数据生成任务已启动。"
+  "workbench.generationStarted": "数据生成任务已启动。",
+  "workbench.error.missingTrainConfig": "\u7f3a\u5c11\u8bad\u7ec3\u914d\u7f6e\u8def\u5f84\u3002",
+  "workbench.label.seed": "\u79cd\u5b50",
+  "workbench.label.events": "\u4e8b\u4ef6",
+  "workbench.label.local": "\u5c40\u90e8",
+  "workbench.label.seasonal": "\u5b63\u8282\u6027",
+  "workbench.label.length": "\u957f\u5ea6",
+  "workbench.label.lengthShort": "\u957f",
+  "workbench.label.seriesShort": "\u7ef4",
+  "workbench.label.feature": "\u7279\u5f81",
+  "workbench.label.ratio": "\u5360\u6bd4",
+  "workbench.label.windows": "\u7a97\u53e3",
+  "workbench.label.window": "\u7a97\u53e3",
+  "workbench.label.effective": "\u6709\u6548\u957f\u5ea6",
+  "workbench.label.patches": "Patch \u6570",
+  "workbench.label.job": "\u4efb\u52a1",
+  "workbench.label.status": "\u72b6\u6001",
+  "workbench.label.started": "\u5f00\u59cb",
+  "workbench.label.finished": "\u7ed3\u675f"
 };
 
 Object.assign(LOCALE_TEXT.zh, LOCALE_TEXT.en, zhOverrides);
+Object.assign(LOCALE_TEXT.zh, {
+  "preview.shadedWindows": "阴影窗口",
+  "metadata.metric.events": "事件数",
+  "metadata.metric.family": "异常家族",
+  "metadata.metric.propagation": "传播方式",
+  "metadata.metric.target": "目标组件",
+  "metadata.stage.sample": "样本",
+  "metadata.stage.stage1": "阶段 1",
+  "metadata.stage.stage2": "阶段 2",
+  "metadata.stage.stage3": "阶段 3",
+  "metadata.field.seed": "种子状态",
+  "metadata.field.records": "参数记录数",
+  "metadata.field.mode": "模式",
+  "metadata.field.maxLag": "最大滞后",
+  "metadata.field.localSampled": "局部事件采样数",
+  "metadata.field.seasonalSampled": "季节事件采样数",
+  "metadata.value.disabled": "已禁用",
+  "metadata.value.arx": "ARX 已启用",
+  "common.enabled": "启用",
+  "common.yes": "是",
+  "common.no": "否",
+  "common.node": "节点",
+  "common.absMean": "绝对均值",
+  "common.absMax": "绝对最大值",
+  "common.length": "长度",
+  "common.selectedNodes": "已选节点",
+  "common.group": "分组",
+  "common.kind": "类型",
+  "common.window": "窗口",
+  "common.active": "当前阶段",
+  "common.pipelineStage": "流程阶段",
+  "summary.length": "长度",
+  "summary.series": "序列数",
+  "summary.events": "事件数",
+  "summary.local": "局部异常",
+  "summary.seasonal": "季节异常",
+  "summary.endogenous": "内生",
+  "summary.anomalous": "是否异常",
+  "stage.stage1": "阶段 1",
+  "stage.stage1.detail": "由趋势、季节性和噪声共同构成基线序列。",
+  "stage.causal": "因果",
+  "stage.causal.detail": "基于 DAG 和 ARX 把跨节点影响混入基线输出。",
+  "stage.local": "局部异常",
+  "stage.local.detail": "局部异常模板会在因果传播前后两个位置注入。",
+  "stage.seasonal": "季节异常",
+  "stage.seasonal.detail": "季节组件异常会先转换成季节增量，再叠加回观测序列。",
+  "stage.final": "最终输出",
+  "stage.final.detail": "最终观测结果相对于正常参考路径的偏移。",
+  "event.total": "总数",
+  "event.local": "局部",
+  "event.seasonal": "季节",
+  "event.endogenous": "内生",
+  "event.target": "目标组件",
+  "event.affected": "受影响节点",
+  "event.rootCause": "根因节点",
+  "event.params": "参数",
+});
 
 const workbenchDom = {
   previewBatch: document.getElementById("preview-batch"),
@@ -1884,6 +2204,7 @@ const workbenchDom = {
   metricCanvas: document.getElementById("wb-metric-canvas"),
   trainingSummary: document.getElementById("wb-training-summary"),
   trainingLog: document.getElementById("wb-training-log"),
+  datasetWarning: document.getElementById("wb-dataset-warning"),
 };
 
 const workbenchState = {
@@ -1894,6 +2215,7 @@ const workbenchState = {
   sampleList: [],
   currentSample: null,
   currentWindow: null,
+  activeInspector: null,
   polling: { generate: null, train: null },
 };
 
@@ -1917,6 +2239,7 @@ function initWorkbench(bootstrap) {
     .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join("");
   workbenchDom.trainTemplate.value = workbenchState.bootstrap.default_train_template ?? templates[0] ?? "";
+  workbenchDom.overwriteRun.checked = false;
   workbenchDom.previewGallery.innerHTML = `<div class="empty-state">${escapeHtml(t("workbench.galleryEmpty"))}</div>`;
   workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
   workbenchDom.trainingSummary.textContent = t("workbench.trainingIdle");
@@ -1980,15 +2303,15 @@ function renderPreviewGallery() {
       const isActive = card.preview_id === workbenchState.activePreviewId;
       return `
         <button type="button" class="preview-gallery-card ${isActive ? "active" : ""}" data-preview-id="${escapeHtml(card.preview_id)}">
-          <h4>seed ${escapeHtml(String(card.seed))}</h4>
+          <h4>${escapeHtml(t("workbench.label.seed"))} ${escapeHtml(String(card.seed))}</h4>
           <div class="chip-row">
-            <span class="preview-chip">L=${escapeHtml(String(card.length))}</span>
-            <span class="preview-chip">D=${escapeHtml(String(card.num_series))}</span>
+            <span class="preview-chip">${escapeHtml(t("workbench.label.lengthShort"))}=${escapeHtml(String(card.length))}</span>
+            <span class="preview-chip">${escapeHtml(t("workbench.label.seriesShort"))}=${escapeHtml(String(card.num_series))}</span>
           </div>
           <div class="chip-row">
-            <span class="preview-chip">events ${escapeHtml(String(card.num_events))}</span>
-            <span class="preview-chip">local ${escapeHtml(String(card.num_local_events))}</span>
-            <span class="preview-chip">seasonal ${escapeHtml(String(card.num_seasonal_events))}</span>
+            <span class="preview-chip">${escapeHtml(t("workbench.label.events"))} ${escapeHtml(String(card.num_events))}</span>
+            <span class="preview-chip">${escapeHtml(t("workbench.label.local"))} ${escapeHtml(String(card.num_local_events))}</span>
+            <span class="preview-chip">${escapeHtml(t("workbench.label.seasonal"))} ${escapeHtml(String(card.num_seasonal_events))}</span>
           </div>
         </button>
       `;
@@ -2039,9 +2362,17 @@ async function startGenerationJob() {
     return;
   }
   try {
-    const payload = await postJson("/api/generate", collectGenerationPayload());
+    const payload = collectGenerationPayload();
+    if (payload.overwrite_run) {
+      const confirmed = window.confirm(buildOverwriteConfirmMessage(payload.run_name));
+      if (!confirmed) {
+        return;
+      }
+      payload.confirm_overwrite = true;
+    }
+    const response = await postJson("/api/generate", payload);
     setStatus(t("workbench.generationStarted"), "ok");
-    pollJob("generate", payload.job_id);
+    pollJob("generate", response.job_id);
   } catch (error) {
     setStatus(error.message ?? t("workbench.generationStarted"), "error");
   }
@@ -2084,6 +2415,9 @@ async function loadSamplesForSplit() {
   if (!runPath) {
     return;
   }
+  workbenchState.sampleList = [];
+  workbenchDom.sampleSelect.innerHTML = "";
+  clearWorkbenchInspectorState({ clearJson: true });
   try {
     const payload = await fetchJson(
       `/api/samples?run_root=${encodeURIComponent(runPath)}&split=${encodeURIComponent(workbenchDom.splitSelect.value)}&limit=300`,
@@ -2092,7 +2426,6 @@ async function loadSamplesForSplit() {
     workbenchDom.sampleSelect.innerHTML = workbenchState.sampleList
       .map((sample) => `<option value="${escapeHtml(sample.sample_id)}">${escapeHtml(sample.sample_id)}</option>`)
       .join("");
-    renderSampleStats([]);
     workbenchDom.datasetJson.textContent = safeJson(payload);
     if (workbenchState.sampleList[0]) {
       workbenchDom.sampleSelect.value = workbenchState.sampleList[0].sample_id;
@@ -2119,14 +2452,19 @@ async function previewPackedSample() {
       stride: Number(workbenchDom.stride.value || 256),
       patch_size: Number(workbenchDom.patchSize.value || 16),
     }));
+    workbenchDom.sampleSelect.value = String(payload.sample_id ?? workbenchDom.sampleSelect.value);
+    workbenchDom.featureIndex.value = String(payload.feature_index ?? workbenchDom.featureIndex.value);
+    workbenchDom.sliceStart.value = String(payload.slice_start ?? workbenchDom.sliceStart.value);
+    workbenchDom.sliceEnd.value = String(payload.slice_end ?? workbenchDom.sliceEnd.value);
+    workbenchDom.contextSize.value = String(payload.windowing?.context_size ?? workbenchDom.contextSize.value);
+    workbenchDom.stride.value = String(payload.windowing?.stride ?? workbenchDom.stride.value);
+    workbenchDom.patchSize.value = String(payload.windowing?.patch_size ?? workbenchDom.patchSize.value);
     workbenchState.currentSample = payload;
-    renderSampleStats([
-      payload.sample_id,
-      `len ${payload.length}`,
-      `feat ${payload.feature_index}`,
-      `ratio ${formatMetric(payload.anomaly_ratio_feature)}`,
-      `windows ${payload.windowing?.num_windows ?? 0}`,
-    ]);
+    workbenchState.currentWindow = null;
+    workbenchState.activeInspector = "sample";
+    renderWorkbenchInspectorState();
+    clearCanvas(workbenchDom.windowCanvas);
+    clearCanvas(workbenchDom.patchCanvas);
     drawSeriesPairChart(workbenchDom.sampleCanvas, payload.series_feature ?? [], payload.normal_series_feature ?? [], payload.point_mask_feature ?? [], []);
     workbenchDom.datasetJson.textContent = safeJson(payload);
     setStatus(t("workbench.sampleLoaded"), "ok");
@@ -2151,14 +2489,25 @@ async function previewPackedWindow() {
       stride: Number(workbenchDom.stride.value || 256),
       patch_size: Number(workbenchDom.patchSize.value || 16),
     }));
+    workbenchDom.sampleSelect.value = String(payload.sample_id ?? workbenchDom.sampleSelect.value);
+    workbenchDom.featureIndex.value = String(payload.feature_index ?? workbenchDom.featureIndex.value);
+    workbenchDom.windowIndex.value = String(payload.window_index ?? workbenchDom.windowIndex.value);
+    workbenchDom.contextSize.value = String(payload.context_size ?? workbenchDom.contextSize.value);
+    workbenchDom.stride.value = String(payload.stride ?? workbenchDom.stride.value);
+    workbenchDom.patchSize.value = String(payload.patch_size ?? workbenchDom.patchSize.value);
+    if (
+      workbenchState.currentSample &&
+      (
+        String(workbenchState.currentSample.sample_id) !== String(payload.sample_id) ||
+        Number(workbenchState.currentSample.feature_index) !== Number(payload.feature_index)
+      )
+    ) {
+      workbenchState.currentSample = null;
+      clearCanvas(workbenchDom.sampleCanvas);
+    }
     workbenchState.currentWindow = payload;
-    renderSampleStats([
-      payload.sample_id,
-      `window ${payload.window_index}`,
-      `[${payload.start}, ${payload.end})`,
-      `effective ${payload.effective_length}`,
-      `patches ${payload.patch_labels?.length ?? 0}`,
-    ]);
+    workbenchState.activeInspector = "window";
+    renderWorkbenchInspectorState();
     drawSeriesPairChart(workbenchDom.windowCanvas, payload.series_feature ?? [], payload.normal_series_feature ?? [], payload.point_mask_feature ?? [], payload.padding_mask ?? []);
     drawPatchBarChart(workbenchDom.patchCanvas, payload.patch_labels ?? []);
     workbenchDom.datasetJson.textContent = safeJson(payload);
@@ -2166,6 +2515,26 @@ async function previewPackedWindow() {
   } catch (error) {
     setStatus(error.message ?? t("workbench.windowLoaded"), "error");
   }
+}
+
+function buildSampleStats(payload) {
+  return [
+    payload.sample_id,
+    `${t("workbench.label.length")} ${payload.length}`,
+    `${t("workbench.label.feature")} ${payload.feature_index}`,
+    `${t("workbench.label.ratio")} ${formatMetric(payload.anomaly_ratio_feature)}`,
+    `${t("workbench.label.windows")} ${payload.windowing?.num_windows ?? 0}`,
+  ];
+}
+
+function buildWindowStats(payload) {
+  return [
+    payload.sample_id,
+    `${t("workbench.label.window")} ${payload.window_index}`,
+    `[${payload.start}, ${payload.end})`,
+    `${t("workbench.label.effective")} ${payload.effective_length}`,
+    `${t("workbench.label.patches")} ${payload.patch_labels?.length ?? 0}`,
+  ];
 }
 
 function renderSampleStats(values) {
@@ -2177,7 +2546,7 @@ function renderSampleStats(values) {
 async function startTrainingJob() {
   const configPath = workbenchDom.trainConfigPath.value.trim();
   if (!configPath) {
-    setStatus("Missing training config path.", "error");
+    setStatus(t("workbench.error.missingTrainConfig"), "error");
     return;
   }
   try {
@@ -2234,10 +2603,10 @@ function pollJob(kind, jobId) {
 
 function renderTrainingJob(job) {
   const chips = [
-    `job ${job.job_id}`,
-    `status ${job.status}`,
-    job.started_at ? `started ${new Date(job.started_at * 1000).toLocaleTimeString()}` : null,
-    job.finished_at ? `finished ${new Date(job.finished_at * 1000).toLocaleTimeString()}` : null,
+    `${t("workbench.label.job")} ${job.job_id}`,
+    `${t("workbench.label.status")} ${job.status}`,
+    job.started_at ? `${t("workbench.label.started")} ${new Date(job.started_at * 1000).toLocaleTimeString()}` : null,
+    job.finished_at ? `${t("workbench.label.finished")} ${new Date(job.finished_at * 1000).toLocaleTimeString()}` : null,
   ].filter(Boolean);
   workbenchDom.trainingStatus.innerHTML = chips
     .map((value) => `<span class="stat-pill">${escapeHtml(String(value))}</span>`)
@@ -2432,6 +2801,7 @@ function drawMetricChart(canvas, epochs, seriesMap, metricNames) {
     context.stroke();
   });
 }
+
 
 
 

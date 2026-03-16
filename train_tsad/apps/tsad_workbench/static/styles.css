@@ -1221,6 +1221,21 @@ button.ghost {
   margin-top: 16px;
 }
 
+.inline-alert {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(216, 205, 189, 0.9);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.inline-alert.warning {
+  border-color: rgba(209, 150, 44, 0.45);
+  background: rgba(255, 244, 217, 0.92);
+  color: #7a5a0f;
+}
+
 .stat-pill {
   border-radius: 999px;
   padding: 7px 12px;

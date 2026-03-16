@@ -341,8 +341,13 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
     run_root_input = str(payload.get("run_root", "")).strip()
     run_root = _resolve_path_like(run_root_input) if run_root_input else (PROJECT_ROOT / "runs" / run_name)
 
-    overwrite = bool(payload.get("overwrite_run", True))
+    overwrite = bool(payload.get("overwrite_run", False))
+    confirm_overwrite = bool(payload.get("confirm_overwrite", False))
     if run_root.exists() and overwrite:
+        if not confirm_overwrite:
+            raise FileExistsError(
+                f"Run root already exists and overwrite was not confirmed: {run_root}"
+            )
         shutil.rmtree(run_root)
     elif run_root.exists() and not overwrite:
         raise FileExistsError(f"Run root already exists: {run_root}")

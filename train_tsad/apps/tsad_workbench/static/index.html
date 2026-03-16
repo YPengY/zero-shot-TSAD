@@ -292,7 +292,7 @@
                 <input id="wb-eval-batch-size" type="number" min="1" value="16" />
               </label>
               <label class="field-lite checkbox-lite field-span-2">
-                <input id="wb-overwrite-run" type="checkbox" checked />
+                <input id="wb-overwrite-run" type="checkbox" />
                 <span data-i18n="workbench.overwriteRun">Overwrite existing run directory if present</span>
               </label>
             </div>
@@ -367,6 +367,7 @@
               <button id="wb-preview-window" class="secondary" data-i18n="workbench.previewWindow">Preview Window</button>
             </div>
             <div class="dataset-stats" id="wb-sample-stats"></div>
+            <div id="wb-dataset-warning" class="inline-alert warning hidden"></div>
             <div class="canvas-card compact-canvas-card">
               <h3 data-i18n="workbench.sampleCanvasTitle">Packed Sample Slice</h3>
               <canvas id="wb-sample-canvas" width="980" height="260"></canvas>
