@@ -103,7 +103,7 @@ anomaly:
   defaults:
     allow_overlap: false
     min_gap: 0
-    max_events_per_node: 2
+    max_events_per_1000_steps_per_node: 2.0
   local:
     budget:
       events_per_sample:

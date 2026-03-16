@@ -479,7 +479,10 @@ class ContextWindowDataset:
             index.extend((raw_index, window_index) for window_index in range(len(windows)))
 
         if not index:
-            raise FileNotFoundError("No context windows could be built from the provided dataset.")
+            raise FileNotFoundError(
+                "No full context windows could be built from the provided dataset. "
+                "Samples shorter than `context_size` and tail remainders are discarded."
+            )
 
         return index
 

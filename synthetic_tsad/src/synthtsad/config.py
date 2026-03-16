@@ -62,7 +62,15 @@ class NodePolicyConfig:
 class AnomalyPlacementConfig:
     allow_overlap: bool
     min_gap: int
-    max_events_per_node: int
+    max_events_per_1000_steps_per_node: float
+
+    def resolve_max_events_per_node(self, sequence_length: int) -> int:
+        if sequence_length <= 0:
+            return 0
+        scaled = (
+            float(self.max_events_per_1000_steps_per_node) * float(sequence_length) / 1000.0
+        )
+        return max(0, int(scaled + 0.5))
 
 
 @dataclass(frozen=True)
@@ -216,7 +224,11 @@ DEBUG_KEYS: set[str] = {
     "enable_seasonal_anomaly",
 }
 ANOMALY_ROOT_KEYS: set[str] = {"defaults", "local", "seasonal"}
-ANOMALY_PLACEMENT_KEYS: set[str] = {"allow_overlap", "min_gap", "max_events_per_node"}
+ANOMALY_PLACEMENT_KEYS: set[str] = {
+    "allow_overlap",
+    "min_gap",
+    "max_events_per_1000_steps_per_node",
+}
 ANOMALY_BUDGET_KEYS: set[str] = {"events_per_sample"}
 LOCAL_ANOMALY_KEYS: set[str] = {"budget", "defaults", "type_weights", "per_type"}
 SEASONAL_ANOMALY_KEYS: set[str] = {"activation_p", "budget", "defaults", "type_weights", "per_type"}
@@ -568,7 +580,7 @@ def _default_anomaly_config() -> dict[str, Any]:
         "defaults": {
             "allow_overlap": False,
             "min_gap": 0,
-            "max_events_per_node": 2,
+            "max_events_per_1000_steps_per_node": 2.0,
         },
         "local": {
             "budget": {"events_per_sample": {"min": 1, "max": 3}},
@@ -1060,9 +1072,9 @@ def _build_config(raw: dict[str, Any]) -> GeneratorConfig:
         min_gap=ensure_non_negative_int(
             anomaly_defaults_raw["min_gap"], "anomaly.defaults.min_gap"
         ),
-        max_events_per_node=ensure_positive_int(
-            anomaly_defaults_raw["max_events_per_node"],
-            "anomaly.defaults.max_events_per_node",
+        max_events_per_1000_steps_per_node=ensure_non_negative_float(
+            anomaly_defaults_raw["max_events_per_1000_steps_per_node"],
+            "anomaly.defaults.max_events_per_1000_steps_per_node",
         ),
     )
 

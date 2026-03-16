@@ -855,8 +855,12 @@ function renderLeafField(value, path) {
   input.dataset.path = path;
   input.dataset.kind = numericKind;
   if (numericMeta) {
-    input.min = String(numericMeta.min);
-    input.max = String(numericMeta.max);
+    if (numericMeta.min != null) {
+      input.min = String(numericMeta.min);
+    }
+    if (numericMeta.max != null) {
+      input.max = String(numericMeta.max);
+    }
   }
   input.addEventListener("change", () => {
     commitNumericInput(input, path, numericKind);
@@ -1672,10 +1676,24 @@ function validateNumericValue(path, value, kind) {
   }
 
   const numericMeta = state.ui.numericBounds[path];
-  if (numericMeta && (value < numericMeta.min || value > numericMeta.max)) {
-    return state.locale === "zh"
-      ? `${label} 必须位于 ${numericMeta.min} 到 ${numericMeta.max} 之间。`
-      : `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`;
+  if (numericMeta) {
+    const hasMin = numericMeta.min != null;
+    const hasMax = numericMeta.max != null;
+    if ((hasMin && value < numericMeta.min) || (hasMax && value > numericMeta.max)) {
+      if (hasMin && hasMax) {
+        return state.locale === "zh"
+          ? `${label} 必须位于 ${numericMeta.min} 到 ${numericMeta.max} 之间。`
+          : `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`;
+      }
+      if (hasMin) {
+        return state.locale === "zh"
+          ? `${label} 必须大于或等于 ${numericMeta.min}。`
+          : `${label} must be at least ${numericMeta.min}.`;
+      }
+      return state.locale === "zh"
+        ? `${label} 必须小于或等于 ${numericMeta.max}。`
+        : `${label} must be at most ${numericMeta.max}.`;
+    }
   }
 
   if (path.endsWith(".min")) {

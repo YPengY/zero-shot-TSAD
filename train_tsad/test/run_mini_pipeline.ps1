@@ -15,7 +15,7 @@
     [int]$SeasonalWindowMin = 16,
     [int]$SeasonalWindowMax = 128,
     [int]$MinGap = 4,
-    [int]$MaxEventsPerNode = 3,
+    [double]$MaxEventsPer1000StepsPerNode = 3.0,
     [double]$EndogenousProbability = 0.25,
     [switch]$DisableTrend,
     [switch]$DisableSeasonality,
@@ -138,8 +138,8 @@ Assert-Range -Name 'SeasonalWindow' -Min $SeasonalWindowMin -Max $SeasonalWindow
 if ($MinGap -lt 0) {
     throw '`MinGap` cannot be negative.'
 }
-if ($MaxEventsPerNode -le 0) {
-    throw '`MaxEventsPerNode` must be positive.'
+if ($MaxEventsPer1000StepsPerNode -lt 0) {
+    throw '`MaxEventsPer1000StepsPerNode` must be >= 0.'
 }
 if (-not $DisableLocalAnomaly -and $LocalEventsMin -le 0) {
     throw '`LocalEventsMin` must be >= 1 when local anomalies are enabled.'
@@ -166,7 +166,7 @@ $SyntheticExtraOverrides = [ordered]@{
 $AnomalyOverrides = [ordered]@{
     defaults = [ordered]@{
         min_gap = $MinGap
-        max_events_per_node = $MaxEventsPerNode
+        max_events_per_1000_steps_per_node = $MaxEventsPer1000StepsPerNode
     }
 }
 if (-not $DisableLocalAnomaly) {

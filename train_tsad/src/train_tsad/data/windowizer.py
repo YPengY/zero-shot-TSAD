@@ -99,11 +99,13 @@ def _build_patch_labels(point_mask: np.ndarray, patch_size: int) -> np.ndarray:
 
 @dataclass(slots=True)
 class SlidingContextWindowizer(ContextWindowizerProtocol):
-    """Slice full sequences into fixed-size context windows for RCD training.
+    """Slice full sequences into fixed-size non-overlapping context windows.
 
-    The windowizer keeps the model-facing context length fixed, pads short
-    samples when requested, and derives per-patch anomaly labels by aggregating
-    point-level anomaly masks within each patch.
+    For compatibility the legacy `stride`, `pad_short_sequences`, and
+    `include_tail` fields are still accepted, but the active behavior is:
+    - short samples are discarded
+    - only full `context_size` windows are kept
+    - tail remainders are dropped instead of padded
     """
 
     context_size: int
@@ -113,7 +115,7 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
     include_tail: bool = True
 
     def __post_init__(self) -> None:
-        """Validate windowizer geometry and infer default stride."""
+        """Validate windowizer geometry and normalize to strict chunking."""
 
         if self.context_size <= 0:
             raise ValueError("`context_size` must be positive.")
@@ -122,18 +124,21 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
         if self.context_size % self.patch_size != 0:
             raise ValueError("`context_size` must be divisible by `patch_size`.")
 
-        if self.stride is None:
-            self.stride = self.context_size
-        if self.stride <= 0:
+        if self.stride is not None and self.stride <= 0:
             raise ValueError("`stride` must be positive.")
+
+        # Training now uses strict full-window chunking only.
+        self.stride = self.context_size
+        self.pad_short_sequences = False
+        self.include_tail = False
 
     def transform(self, sample: RawSample) -> tuple[ContextWindowSample, ...]:
         """Convert one raw sequence into fixed-size context windows.
 
         Workflow:
         1. Validate source arrays and align optional masks.
-        2. Iterate window bounds from `_iter_context_bounds`.
-        3. Slice/pad per-window tensors and build patch-level labels.
+        2. Iterate full-window bounds from `_iter_context_bounds`.
+        3. Slice per-window tensors and build patch-level labels.
         4. Return immutable tuple of `ContextWindowSample`.
         """
 
@@ -225,29 +230,21 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
         """Generate `(start, end)` windows over one sequence.
 
         Behavior:
-        - Short sequences are optionally represented as one padded window.
-        - Long sequences use `stride`; optional `include_tail` ensures last points
-          are not dropped when stride does not land exactly on the end.
+        - Sequences shorter than `context_size` are discarded.
+        - Only non-overlapping full windows are kept.
+        - Tail remainders shorter than `context_size` are dropped.
         """
 
         if sequence_length <= 0:
             raise ValueError("`series` must contain at least one time step.")
         if sequence_length < self.context_size:
-            if not self.pad_short_sequences:
-                raise ValueError(
-                    "Encountered a short sequence while `pad_short_sequences` is disabled. "
-                    f"Got length={sequence_length}, context_size={self.context_size}."
-                )
-            return ((0, sequence_length),)
-        if sequence_length == self.context_size:
-            return ((0, sequence_length),)
+            return ()
 
-        max_start = sequence_length - self.context_size
-        starts = list(range(0, max_start + 1, self.stride))
-        if self.include_tail and starts[-1] != max_start:
-            starts.append(max_start)
-
-        return tuple((start, start + self.context_size) for start in starts)
+        usable_length = (sequence_length // self.context_size) * self.context_size
+        return tuple(
+            (start, start + self.context_size)
+            for start in range(0, usable_length, self.context_size)
+        )
 
 
 __all__ = ["SlidingContextWindowizer"]

@@ -46,6 +46,7 @@ class JobState:
     started_at: float | None = None
     finished_at: float | None = None
     logs: list[str] = field(default_factory=list)
+    artifacts: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] | None = None
     error: str | None = None
 
@@ -82,6 +83,10 @@ def _resolve_path_like(path_like: str) -> Path:
 
 
 def _job_to_dict(job: JobState) -> dict[str, Any]:
+    progress = None
+    progress_path = job.artifacts.get("progress_path")
+    if isinstance(progress_path, str):
+        progress = _read_json_artifact(Path(progress_path))
     return {
         "job_id": job.job_id,
         "kind": job.kind,
@@ -90,6 +95,8 @@ def _job_to_dict(job: JobState) -> dict[str, Any]:
         "started_at": job.started_at,
         "finished_at": job.finished_at,
         "logs": job.logs,
+        "artifacts": job.artifacts,
+        "progress": progress,
         "result": job.result,
         "error": job.error,
     }
@@ -110,6 +117,15 @@ def _append_log(job: JobState, line: str) -> None:
         job.logs.append(text)
         if len(job.logs) > JOB_LOG_LIMIT:
             del job.logs[:500]
+
+
+def _read_json_artifact(path: Path) -> Any | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _run_subprocess(cmd: list[str], *, cwd: Path, job: JobState) -> None:
@@ -180,18 +196,15 @@ def _iter_context_bounds(
     stride: int,
     include_tail: bool,
 ) -> list[tuple[int, int]]:
+    _ = stride
+    _ = include_tail
     if sequence_length <= 0:
         return []
     if sequence_length < context_size:
-        return [(0, sequence_length)]
-    if sequence_length == context_size:
-        return [(0, sequence_length)]
+        return []
 
-    max_start = sequence_length - context_size
-    starts = list(range(0, max_start + 1, stride))
-    if include_tail and starts[-1] != max_start:
-        starts.append(max_start)
-    return [(start, start + context_size) for start in starts]
+    usable_length = (sequence_length // context_size) * context_size
+    return [(start, start + context_size) for start in range(0, usable_length, context_size)]
 
 
 def _resolve_packed_root(path_like: str) -> Path:
@@ -320,6 +333,7 @@ def _build_run_info(path_like: str) -> dict[str, Any]:
         "data_quality_report": str(train_output_dir / "data_quality_report.json"),
         "history_path": str(train_output_dir / "history.json"),
         "summary_path": str(train_output_dir / "summary.json"),
+        "progress_path": str(train_output_dir / "progress.json"),
     }
 
 
@@ -457,6 +471,20 @@ def _run_train_job(payload: dict[str, Any], job: JobState) -> dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Missing training config: {config_path}")
 
+    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    output_dir = config_payload.get("train", {}).get("output_dir")
+    output_dir_str = str(_resolve_path_like(str(output_dir))) if output_dir else None
+    if output_dir_str:
+        with JOBS_LOCK:
+            job.artifacts = {
+                "config_path": str(config_path),
+                "output_dir": output_dir_str,
+                "data_quality_report": str(Path(output_dir_str) / "data_quality_report.json"),
+                "history_path": str(Path(output_dir_str) / "history.json"),
+                "summary_path": str(Path(output_dir_str) / "summary.json"),
+                "progress_path": str(Path(output_dir_str) / "progress.json"),
+            }
+
     cmd = [
         str(python_exe),
         "-B",
@@ -477,16 +505,13 @@ def _run_train_job(payload: dict[str, Any], job: JobState) -> dict[str, Any]:
 
     _run_subprocess(cmd, cwd=PROJECT_ROOT, job=job)
 
-    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
-    output_dir = config_payload.get("train", {}).get("output_dir")
-    output_dir_str = str(_resolve_path_like(str(output_dir))) if output_dir else None
-
     return {
         "config_path": str(config_path),
         "output_dir": output_dir_str,
         "data_quality_report": str(Path(output_dir_str) / "data_quality_report.json") if output_dir_str else None,
         "history_path": str(Path(output_dir_str) / "history.json") if output_dir_str else None,
         "summary_path": str(Path(output_dir_str) / "summary.json") if output_dir_str else None,
+        "progress_path": str(Path(output_dir_str) / "progress.json") if output_dir_str else None,
     }
 
 
@@ -543,12 +568,89 @@ def _build_metric_series(history: list[dict[str, Any]]) -> dict[str, Any]:
 
     preferred_loss = next((name for name in metric_names if name.endswith("total_loss") and name.startswith("train.")), None)
     preferred_val = next((name for name in metric_names if name.startswith("val.")), None)
+    chart_groups = _group_metric_names(metric_names)
+    latest_entry = history[-1] if history else {}
     return {
         "epochs": epochs,
         "series": series,
         "metric_names": metric_names,
         "preferred_loss": preferred_loss,
         "preferred_quality": preferred_val,
+        "chart_groups": chart_groups,
+        "latest_epoch": int(latest_entry.get("epoch", 0)) if isinstance(latest_entry, dict) and latest_entry else None,
+        "latest_train": latest_entry.get("train") if isinstance(latest_entry, dict) else None,
+        "latest_val": latest_entry.get("val") if isinstance(latest_entry, dict) else None,
+    }
+
+
+def _group_metric_names(metric_names: list[str]) -> dict[str, list[str]]:
+    groups = {
+        "loss": [],
+        "quality": [],
+        "calibration": [],
+    }
+    for name in metric_names:
+        _, key = name.split(".", 1)
+        if key.startswith("num_") or key in {"tp", "fp", "fn", "anomaly_weight", "reconstruction_weight"}:
+            continue
+        if "loss" in key:
+            groups["loss"].append(name)
+            continue
+        if key in {"precision", "recall", "f1", "pr_auc", "patch_accuracy"}:
+            groups["quality"].append(name)
+            continue
+        if key in {"predicted_positive_rate", "target_positive_rate", "threshold", "reconstruction_mask_fraction", "reconstruction_used_mask"}:
+            groups["calibration"].append(name)
+    return {name: values for name, values in groups.items() if values}
+
+
+def _build_training_kpis(
+    history: list[dict[str, Any]],
+    summary: dict[str, Any] | None,
+    progress: dict[str, Any] | None,
+) -> dict[str, Any]:
+    latest_entry = history[-1] if history else {}
+    latest_train = latest_entry.get("train") if isinstance(latest_entry, dict) else None
+    latest_val = latest_entry.get("val") if isinstance(latest_entry, dict) else None
+    progress_train = progress.get("latest_train_metrics") if isinstance(progress, dict) else None
+    progress_val = progress.get("latest_val_metrics") if isinstance(progress, dict) else None
+    latest_train = progress_train if isinstance(progress_train, dict) and progress_train else latest_train
+    latest_val = progress_val if isinstance(progress_val, dict) and progress_val else latest_val
+
+    monitor_metric = None
+    monitor_mode = None
+    if isinstance(progress, dict):
+        monitor_metric = progress.get("monitor_metric")
+        monitor_mode = progress.get("monitor_mode")
+
+    best_epoch = summary.get("best_epoch") if isinstance(summary, dict) else None
+    best_metric = summary.get("best_metric") if isinstance(summary, dict) else None
+    if best_epoch is None and isinstance(progress, dict):
+        best_epoch = progress.get("best_epoch")
+    if best_metric is None and isinstance(progress, dict):
+        best_metric = progress.get("best_metric")
+    latest_monitor_value = None
+    if monitor_metric and isinstance(latest_val, dict) and monitor_metric in latest_val:
+        latest_monitor_value = latest_val.get(monitor_metric)
+    elif monitor_metric and isinstance(latest_train, dict):
+        latest_monitor_value = latest_train.get(monitor_metric)
+
+    return {
+        "epoch_current": progress.get("epoch_current") if isinstance(progress, dict) else (int(latest_entry.get("epoch", 0)) if latest_entry else None),
+        "epoch_total": progress.get("epoch_total") if isinstance(progress, dict) else None,
+        "status": progress.get("status") if isinstance(progress, dict) else None,
+        "stage": progress.get("stage") if isinstance(progress, dict) else None,
+        "overall_progress_ratio": progress.get("overall_progress_ratio") if isinstance(progress, dict) else None,
+        "learning_rate": progress.get("learning_rate") if isinstance(progress, dict) else None,
+        "elapsed_seconds": progress.get("elapsed_seconds") if isinstance(progress, dict) else None,
+        "eta_seconds": progress.get("eta_seconds") if isinstance(progress, dict) else None,
+        "best_epoch": best_epoch,
+        "best_metric": best_metric,
+        "monitor_metric": monitor_metric,
+        "monitor_mode": monitor_mode,
+        "latest_monitor_value": latest_monitor_value,
+        "latest_train": latest_train,
+        "latest_val": latest_val,
     }
 
 
@@ -774,9 +876,10 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             slice_start = max(0, int(query.get("slice_start", [0])[0]))
             slice_end = int(query.get("slice_end", [0])[0])
             context_size = int(query.get("context_size", [512])[0])
-            stride = int(query.get("stride", [256])[0])
+            _requested_stride = int(query.get("stride", [256])[0])
             patch_size = int(query.get("patch_size", [16])[0])
-            include_tail = str(query.get("include_tail", ["true"])[0]).lower() != "false"
+            stride = context_size
+            include_tail = False
 
             row = next(
                 (entry for entry in _load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
@@ -809,9 +912,8 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             window_rows: list[dict[str, Any]] = []
             for start, end in windows[:500]:
                 effective = end - start
-                padded = max(0, context_size - effective)
-                feature_mask = np.zeros((context_size,), dtype=np.uint8)
-                feature_mask[:effective] = point_mask[start:end, feature_index]
+                padded = 0
+                feature_mask = point_mask[start:end, feature_index].astype(np.uint8, copy=False)
                 patch_positive_ratio = 0.0
                 if patch_size > 0 and context_size % patch_size == 0:
                     patch_labels = feature_mask.reshape(context_size // patch_size, patch_size).max(axis=1)
@@ -866,9 +968,10 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             feature_index = int(query.get("feature_index", [0])[0])
             window_index = max(0, int(query.get("window_index", [0])[0]))
             context_size = int(query.get("context_size", [512])[0])
-            stride = max(1, int(query.get("stride", [256])[0]))
+            _requested_stride = max(1, int(query.get("stride", [256])[0]))
             patch_size = max(1, int(query.get("patch_size", [16])[0]))
-            include_tail = str(query.get("include_tail", ["true"])[0]).lower() != "false"
+            stride = context_size
+            include_tail = False
 
             row = next(
                 (entry for entry in _load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
@@ -883,23 +986,20 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             feature_index = max(0, min(feature_index, dims - 1))
             windows = _iter_context_bounds(length, context_size=context_size, stride=stride, include_tail=include_tail)
             if not windows:
-                raise ValueError("No windows available for the selected sample.")
+                raise ValueError(
+                    "No full training windows are available for the selected sample. "
+                    "Samples shorter than context_size and tail remainders are discarded."
+                )
             if window_index >= len(windows):
                 window_index = len(windows) - 1
             start, end = windows[window_index]
             effective_length = end - start
 
-            series_window = np.zeros((context_size,), dtype=np.float32)
-            normal_window = np.zeros((context_size,), dtype=np.float32)
-            mask_window = np.zeros((context_size,), dtype=np.uint8)
-            any_window = np.zeros((context_size,), dtype=np.uint8)
-            padding_mask = np.ones((context_size,), dtype=np.uint8)
-
-            series_window[:effective_length] = sample_payload["series"][start:end, feature_index]
-            normal_window[:effective_length] = sample_payload["normal_series"][start:end, feature_index]
-            mask_window[:effective_length] = sample_payload["point_mask"][start:end, feature_index]
-            any_window[:effective_length] = sample_payload["point_mask_any"][start:end]
-            padding_mask[:effective_length] = 0
+            series_window = np.asarray(sample_payload["series"][start:end, feature_index], dtype=np.float32)
+            normal_window = np.asarray(sample_payload["normal_series"][start:end, feature_index], dtype=np.float32)
+            mask_window = np.asarray(sample_payload["point_mask"][start:end, feature_index], dtype=np.uint8)
+            any_window = np.asarray(sample_payload["point_mask_any"][start:end], dtype=np.uint8)
+            padding_mask = np.zeros((context_size,), dtype=np.uint8)
 
             trimmed_length = context_size - (context_size % patch_size)
             patch_labels = []
@@ -946,6 +1046,7 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             history_path = output_dir / "history.json"
             summary_path = output_dir / "summary.json"
             quality_path = output_dir / "data_quality_report.json"
+            progress_path = output_dir / "progress.json"
 
             history = []
             if history_path.exists():
@@ -955,14 +1056,19 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
 
             summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
             quality = json.loads(quality_path.read_text(encoding="utf-8")) if quality_path.exists() else None
+            progress = _read_json_artifact(progress_path)
+            history_view = _build_metric_series(history)
             self._write_json(
                 HTTPStatus.OK,
                 {
                     "output_dir": str(output_dir),
                     "history": history,
-                    "history_view": _build_metric_series(history),
+                    "history_view": history_view,
                     "summary": summary,
+                    "progress": progress,
+                    "kpis": _build_training_kpis(history, summary, progress),
                     "data_quality_report": quality,
+                    "progress_path": str(progress_path),
                 },
             )
         except Exception as exc:

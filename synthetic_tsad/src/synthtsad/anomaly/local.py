@@ -728,9 +728,10 @@ class LocalAnomalyInjector:
         t_end: int,
         placements: dict[int, list[tuple[int, int]]],
         counts: dict[int, int],
+        max_events_per_node: int,
     ) -> bool:
         policy = self._placement_policy()
-        if counts.get(node, 0) >= int(policy.max_events_per_node):
+        if counts.get(node, 0) >= max_events_per_node:
             return False
         if bool(policy.allow_overlap):
             return True
@@ -739,6 +740,9 @@ class LocalAnomalyInjector:
             if not (t_end + min_gap <= start or t_start >= end + min_gap):
                 return False
         return True
+
+    def _resolved_node_event_cap(self, n: int) -> int:
+        return self._placement_policy().resolve_max_events_per_node(sequence_length=n)
 
     def _render_triangular_spike(
         self,
@@ -841,6 +845,9 @@ class LocalAnomalyInjector:
         placements: dict[int, list[tuple[int, int]]] = {node: [] for node in nodes}
         counts: dict[int, int] = {node: 0 for node in nodes}
         event_count = local_cfg.events_per_sample.sample(rng)
+        max_events_per_node = self._resolved_node_event_cap(n)
+        if max_events_per_node <= 0:
+            return []
 
         for _ in range(event_count):
             placed = False
@@ -852,7 +859,12 @@ class LocalAnomalyInjector:
                     kind=kind, n=n, rng=rng, spec=spec
                 )
                 if not self._can_place(
-                    node=node, t_start=t_start, t_end=t_end, placements=placements, counts=counts
+                    node=node,
+                    t_start=t_start,
+                    t_end=t_end,
+                    placements=placements,
+                    counts=counts,
+                    max_events_per_node=max_events_per_node,
                 ):
                     continue
                 endogenous_p = float(local_cfg.endogenous_p)

@@ -134,7 +134,7 @@ FIELD_LABELS = {
     "budget": "Budget",
     "allow_overlap": "Allow Overlap",
     "min_gap": "Minimum Gap",
-    "max_events_per_node": "Max Events Per Node",
+    "max_events_per_1000_steps_per_node": "Max Events Per 1000 Steps Per Node",
     "events_per_sample": "Events Per Sample",
     "activation_p": "Activation Probability",
     "window_length": "Event Window Length",
@@ -221,7 +221,7 @@ FIELD_LABELS_ZH = {
     "budget": "预算",
     "allow_overlap": "允许重叠",
     "min_gap": "最小间隔",
-    "max_events_per_node": "单节点最大事件数",
+    "max_events_per_1000_steps_per_node": "每1000时间点单节点最大事件数",
     "events_per_sample": "每样本事件数",
     "activation_p": "激活概率",
     "window_length": "事件窗口长度",
@@ -521,8 +521,8 @@ FIELD_DESCRIPTIONS = {
     "budget": "Controls how many events this anomaly family may contribute.",
     "allow_overlap": "Whether multiple events may occupy overlapping windows on the same node.",
     "min_gap": "Minimum empty gap kept between non-overlapping events on the same node.",
-    "max_events_per_node": "Upper bound on how many events can be assigned to one node.",
-    "events_per_sample": "How many events this anomaly family may sample in one series.",
+    "max_events_per_1000_steps_per_node": "Per-node event cap rate measured per 1000 time steps. The realized cap is rounded from rate * sequence_length / 1000.",
+    "events_per_sample": "How many events this anomaly family may sample in one series. The editor does not impose a hard upper bound.",
     "activation_p": "Chance of enabling the seasonal anomaly planner for the current sample.",
     "window_length": "Allowed time-window length for anomaly events.",
     "type_weights": "Relative sampling weights across anomaly archetypes or operators.",
@@ -605,8 +605,8 @@ FIELD_DESCRIPTIONS_ZH = {
     "budget": "控制该异常族在单条样本里最多采多少事件。",
     "allow_overlap": "同一节点上的事件窗口是否允许重叠。",
     "min_gap": "同一节点相邻事件之间至少保留多少空白间隔。",
-    "max_events_per_node": "单个节点允许承载的事件上限。",
-    "events_per_sample": "该异常族在单条序列中采样多少个事件。",
+    "max_events_per_1000_steps_per_node": "按每 1000 个时间点衡量的单节点事件上限速率。实际限制会按 rate * sequence_length / 1000 四舍五入。",
+    "events_per_sample": "该异常族在单条序列中采样多少个事件。编辑器不再对它施加硬性上界。",
     "activation_p": "当前样本启用季节异常规划器的概率。",
     "window_length": "异常事件作用窗口的长度范围。",
     "type_weights": "不同异常类型被采到的相对权重。",
@@ -676,7 +676,7 @@ def _build_multi_select_options(defaults: dict[str, Any]) -> dict[str, list[str]
 
 
 RANGE_BOUNDS: dict[str, tuple[float, float, str]] = {
-    "sequence_length": (32, 2048, "int"),
+    "sequence_length": (32, 10000, "int"),
     "num_series": (1, 12, "int"),
     "stage1.trend.change_points": (1, 8, "int"),
     "stage1.trend.arima.d": (1, 3, "int"),
@@ -713,7 +713,7 @@ SCALAR_BOUNDS: dict[str, tuple[float, float, str]] = {
     "causal.alpha_i_min": (0.05, 0.8, "float"),
     "causal.alpha_i_max": (0.2, 0.98, "float"),
     "anomaly.defaults.min_gap": (0, 32, "int"),
-    "anomaly.defaults.max_events_per_node": (1, 8, "int"),
+    "anomaly.defaults.max_events_per_1000_steps_per_node": (0.0, 8.0, "float"),
     "anomaly.local.defaults.endogenous_p": (0.0, 1.0, "float"),
     "anomaly.seasonal.defaults.endogenous_p": (0.0, 1.0, "float"),
     "anomaly.seasonal.activation_p": (0.0, 1.0, "float"),
@@ -888,13 +888,15 @@ def _build_locale_payload_v2(defaults: dict[str, Any], locale: str) -> dict[str,
     }
 
 
-def _build_numeric_bounds() -> dict[str, dict[str, int | float | str]]:
-    bounds: dict[str, dict[str, int | float | str]] = {}
+def _build_numeric_bounds() -> dict[str, dict[str, int | float | str | None]]:
+    bounds: dict[str, dict[str, int | float | str | None]] = {}
     for path, (low, high, kind) in SCALAR_BOUNDS.items():
-        bounds[path] = {"min": low, "max": high, "kind": kind}
+        _ = high
+        bounds[path] = {"min": low, "max": None, "kind": kind}
     for path, (low, high, kind) in RANGE_BOUNDS.items():
-        bounds[f"{path}.min"] = {"min": low, "max": high, "kind": kind}
-        bounds[f"{path}.max"] = {"min": low, "max": high, "kind": kind}
+        _ = high
+        bounds[f"{path}.min"] = {"min": low, "max": None, "kind": kind}
+        bounds[f"{path}.max"] = {"min": low, "max": None, "kind": kind}
     return bounds
 
 
@@ -1041,8 +1043,8 @@ def _randomize_from_defaults(rng: np.random.Generator) -> dict[str, Any]:
     anomaly = raw["anomaly"]
     anomaly["defaults"]["allow_overlap"] = bool(rng.random() < 0.25)
     anomaly["defaults"]["min_gap"] = _sample_scalar("anomaly.defaults.min_gap", rng)
-    anomaly["defaults"]["max_events_per_node"] = _sample_scalar(
-        "anomaly.defaults.max_events_per_node", rng
+    anomaly["defaults"]["max_events_per_1000_steps_per_node"] = _sample_scalar(
+        "anomaly.defaults.max_events_per_1000_steps_per_node", rng
     )
     _randomize_anomaly_family(
         anomaly["local"],

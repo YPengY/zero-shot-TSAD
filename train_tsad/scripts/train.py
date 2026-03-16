@@ -97,7 +97,7 @@ def _build_window_loader(
     """Build window dataset + dataloader for train/validation.
 
     The function wires together:
-    - Sliding window slicing (`SlidingContextWindowizer`)
+    - Strict full-window chunking (`SlidingContextWindowizer`)
     - Optional patch masking (only when reconstruction loss is enabled)
     - Batch collation into `Batch` tensors
     """

@@ -41,9 +41,10 @@
     "workbench.sliceStart": "Slice Start",
     "workbench.sliceEnd": "Slice End",
     "workbench.contextSize": "Context Size",
-    "workbench.stride": "Stride",
+    "workbench.stride": "Window Step",
     "workbench.patchSize": "Patch Size",
     "workbench.windowIndex": "Window Index",
+    "workbench.windowRuleHint": "Uses non-overlapping full windows only. Tail remainder and short samples are discarded.",
     "workbench.loadSamples": "Load Samples",
     "workbench.previewPackedSample": "Preview Sample Slice",
     "workbench.previewWindow": "Preview Window",
@@ -63,6 +64,22 @@
     "workbench.refreshTraining": "Refresh Metrics",
     "workbench.lossCanvasTitle": "Loss Curve",
     "workbench.metricCanvasTitle": "Validation Curve",
+    "workbench.calibrationCanvasTitle": "Behavior And Calibration",
+    "workbench.lossCanvasHint": "Track total, anomaly, and reconstruction loss together.",
+    "workbench.metricCanvasHint": "Watch detection quality move instead of waiting for the final summary.",
+    "workbench.calibrationCanvasHint": "Compare target ratio, predicted ratio, threshold, and mask usage.",
+    "workbench.trainingProgressEyebrow": "Live Progress",
+    "workbench.trainingProgressTitle": "Current Run",
+    "workbench.trainingDetailsTitle": "Raw Training Details",
+    "workbench.trainingDetailsHint": "Open JSON and subprocess logs only when you need low-level debugging detail.",
+    "workbench.kpi.epoch": "Epoch progress",
+    "workbench.kpi.monitor": "Best monitored metric",
+    "workbench.kpi.trainLoss": "Train total loss",
+    "workbench.kpi.valQuality": "Latest validation signal",
+    "workbench.kpi.learningRate": "Learning rate",
+    "workbench.kpi.balance": "Positive-rate gap",
+    "workbench.kpi.runtime": "Elapsed / ETA",
+    "workbench.kpi.threshold": "Detection threshold",
     "workbench.galleryEmpty": "Build a preview gallery to compare multiple sampled sequences.",
     "workbench.samplesEmpty": "Load a run and split to browse packed samples.",
     "workbench.trainingIdle": "Training has not started yet.",
@@ -73,6 +90,7 @@
     "workbench.trainingStarted": "Training job started.",
     "workbench.generationStarted": "Dataset generation job started.",
     "workbench.error.missingTrainConfig": "Missing training config path.",
+    "workbench.error.missingRunLookup": "Provide a run path or packed root before loading an existing run.",
     "workbench.label.seed": "seed",
     "workbench.label.events": "events",
     "workbench.label.local": "local",
@@ -395,6 +413,39 @@ const DATASET_KIND_LABELS = {
   en: { signal: "Signal", delta: "Delta", component: "Component" },
   zh: { signal: "信号", delta: "增量", component: "组件" },
 };
+
+const METRIC_LABELS = {
+  en: {
+    total_loss: "Total loss",
+    anomaly_loss: "Anomaly loss",
+    reconstruction_loss: "Reconstruction loss",
+    patch_accuracy: "Patch accuracy",
+    precision: "Precision",
+    recall: "Recall",
+    f1: "F1",
+    pr_auc: "PR-AUC",
+    predicted_positive_rate: "Predicted positive rate",
+    target_positive_rate: "Target positive rate",
+    threshold: "Threshold",
+    reconstruction_mask_fraction: "Mask fraction",
+    reconstruction_used_mask: "Mask enabled",
+  },
+  zh: {
+    total_loss: "总损失",
+    anomaly_loss: "异常损失",
+    reconstruction_loss: "重建损失",
+    patch_accuracy: "Patch 准确率",
+    precision: "精确率",
+    recall: "召回率",
+    f1: "F1",
+    pr_auc: "PR-AUC",
+    predicted_positive_rate: "预测正例占比",
+    target_positive_rate: "目标正例占比",
+    threshold: "阈值",
+    reconstruction_mask_fraction: "掩码占比",
+    reconstruction_used_mask: "启用掩码",
+  },
+};
 const state = {
   defaults: null,
   config: null,
@@ -429,6 +480,7 @@ const dom = {
   seriesTitle: document.getElementById("series-title"),
   seriesSubtitle: document.getElementById("series-subtitle"),
   seriesBadges: document.getElementById("series-badges"),
+  seriesLegend: document.getElementById("series-legend"),
   seriesFooter: document.getElementById("series-footer"),
   datasetHint: document.getElementById("dataset-hint"),
   datasetStagePill: document.getElementById("dataset-stage-pill"),
@@ -701,12 +753,12 @@ function refreshWorkbenchLocale() {
   }
   renderPreviewGallery();
   renderWorkbenchInspectorState();
+  if (state.preview) {
+    renderSeriesLegend();
+  }
+  renderTrainingMonitor();
   if (!workbenchState.sampleList.length && workbenchState.activeInspector == null) {
     workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
-  }
-  if (!workbenchState.polling.train && !workbenchState.currentSample && !workbenchState.currentWindow) {
-    workbenchDom.trainingSummary.textContent = t("workbench.trainingIdle");
-    workbenchDom.trainingLog.textContent = t("workbench.trainingIdle");
   }
 }
 
@@ -871,8 +923,12 @@ function renderLeafField(value, path) {
   input.dataset.path = path;
   input.dataset.kind = numericKind;
   if (numericMeta) {
-    input.min = String(numericMeta.min);
-    input.max = String(numericMeta.max);
+    if (numericMeta.min != null) {
+      input.min = String(numericMeta.min);
+    }
+    if (numericMeta.max != null) {
+      input.max = String(numericMeta.max);
+    }
   }
   input.addEventListener("change", () => {
     commitNumericInput(input, path, numericKind);
@@ -1087,6 +1143,7 @@ function renderNodeSelector() {
 function renderSeries() {
   if (!state.preview) {
     clearCanvas(dom.seriesCanvas);
+    renderLegendChips(dom.seriesLegend, []);
     renderEmptyDatasetHint();
     return;
   }
@@ -1094,11 +1151,13 @@ function renderSeries() {
   const series = state.preview.series[datasetName];
   if (!series) {
     clearCanvas(dom.seriesCanvas);
+    renderLegendChips(dom.seriesLegend, []);
     renderEmptyDatasetHint();
     return;
   }
   updateDatasetHint(datasetName);
   drawLineChart(dom.seriesCanvas, series, state.selectedNodes, state.preview.labels.point_mask_any);
+  renderSeriesLegend();
 }
 
 function renderMask() {
@@ -1405,9 +1464,41 @@ function renderEmptyDatasetHint() {
   dom.seriesTitle.textContent = t("preview.title");
   dom.seriesSubtitle.textContent = t("status.layerEmpty");
   dom.seriesBadges.innerHTML = "";
+  dom.seriesLegend.innerHTML = "";
   dom.seriesFooter.innerHTML = "";
   dom.datasetStagePill.textContent = "";
   dom.datasetHint.innerHTML = `<div class="dataset-empty">${escapeHtml(t("status.layerEmpty"))}</div>`;
+}
+
+function renderSeriesLegend() {
+  if (!state.preview || !state.selectedNodes.length) {
+    renderLegendChips(dom.seriesLegend, []);
+    return;
+  }
+  renderLegendChips(
+    dom.seriesLegend,
+    state.selectedNodes.map((node, index) => ({
+      color: palette[index % palette.length],
+      label: `${t("common.node")} ${node}`,
+    })),
+  );
+}
+
+function renderLegendChips(container, items) {
+  if (!container) {
+    return;
+  }
+  const safeItems = Array.isArray(items) ? items : [];
+  container.innerHTML = safeItems
+    .map(
+      (item) => `
+        <span class="legend-chip">
+          <span class="legend-chip-swatch" style="background:${escapeHtml(String(item.color ?? "#b55232"))}"></span>
+          <span>${escapeHtml(String(item.label ?? ""))}</span>
+        </span>
+      `,
+    )
+    .join("");
 }
 
 function drawLineChart(canvas, data, selectedNodes, maskAny) {
@@ -1469,18 +1560,9 @@ function drawLineChart(canvas, data, selectedNodes, maskAny) {
     context.stroke();
   });
 
-  context.font = "12px Segoe UI";
-  context.fillStyle = "#1e1a16";
-  selectedNodes.forEach((node, index) => {
-    const legendX = padding.left + index * 110;
-    context.fillStyle = palette[index % palette.length];
-    context.fillRect(legendX, 8, 16, 4);
-    context.fillStyle = "#1e1a16";
-    context.fillText(`${t("common.node")} ${node}`, legendX + 22, 14);
-  });
 }
 
-function drawAxes(context, padding, width, height, minValue, maxValue, length) {
+function drawAxes(context, padding, width, height, minValue, maxValue, length, options = {}) {
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   context.strokeStyle = "#bcb3a6";
@@ -1503,8 +1585,12 @@ function drawAxes(context, padding, width, height, minValue, maxValue, length) {
     context.lineTo(padding.left + plotWidth, y);
     context.stroke();
   }
-  context.fillText("t=0", padding.left, height - 10);
-  context.fillText(`t=${length - 1}`, width - 70, height - 10);
+  const xStartLabel = options.xStartLabel ?? "t=0";
+  const xEndLabel = options.xEndLabel ?? `t=${Math.max(length - 1, 0)}`;
+  context.fillText(String(xStartLabel), padding.left, height - 10);
+  const endText = String(xEndLabel);
+  const endWidth = context.measureText(endText).width;
+  context.fillText(endText, Math.max(padding.left + 20, width - padding.right - endWidth), height - 10);
 }
 
 function drawMaskHeatmap(canvas, pointMask, selectedNodes) {
@@ -1688,11 +1774,27 @@ function validateNumericValue(path, value, kind) {
   }
 
   const numericMeta = state.ui.numericBounds[path];
-  if (numericMeta && (value < numericMeta.min || value > numericMeta.max)) {
-    return localizeText(
-      `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`,
-      `${label} 必须在 ${numericMeta.min} 到 ${numericMeta.max} 之间。`,
-    );
+  if (numericMeta) {
+    const hasMin = numericMeta.min != null;
+    const hasMax = numericMeta.max != null;
+    if ((hasMin && value < numericMeta.min) || (hasMax && value > numericMeta.max)) {
+      if (hasMin && hasMax) {
+        return localizeText(
+          `${label} must be between ${numericMeta.min} and ${numericMeta.max}.`,
+          `${label} 必须在 ${numericMeta.min} 到 ${numericMeta.max} 之间。`,
+        );
+      }
+      if (hasMin) {
+        return localizeText(
+          `${label} must be at least ${numericMeta.min}.`,
+          `${label} 必须大于或等于 ${numericMeta.min}。`,
+        );
+      }
+      return localizeText(
+        `${label} must be at most ${numericMeta.max}.`,
+        `${label} 必须小于或等于 ${numericMeta.max}。`,
+      );
+    }
   }
 
   if (path.endsWith(".min")) {
@@ -2042,9 +2144,10 @@ const zhOverrides = {
   "workbench.sliceStart": "切片起点",
   "workbench.sliceEnd": "切片终点",
   "workbench.contextSize": "上下文长度",
-  "workbench.stride": "步长",
+  "workbench.stride": "窗口步长",
   "workbench.patchSize": "Patch 大小",
   "workbench.windowIndex": "窗口索引",
+  "workbench.windowRuleHint": "仅使用不重叠的完整窗口。尾部不足一窗的数据和短样本会被直接丢弃。",
   "workbench.loadSamples": "加载样本",
   "workbench.previewPackedSample": "预览样本切片",
   "workbench.previewWindow": "预览窗口",
@@ -2064,6 +2167,22 @@ const zhOverrides = {
   "workbench.refreshTraining": "刷新指标",
   "workbench.lossCanvasTitle": "损失曲线",
   "workbench.metricCanvasTitle": "验证曲线",
+  "workbench.calibrationCanvasTitle": "行为与校准",
+  "workbench.lossCanvasHint": "把总损失、异常损失和重建损失放在一起跟踪。",
+  "workbench.metricCanvasHint": "不用等最终总结，训练中就能看到检测质量的变化。",
+  "workbench.calibrationCanvasHint": "对比目标正例占比、预测正例占比、阈值和掩码使用情况。",
+  "workbench.trainingProgressEyebrow": "实时进度",
+  "workbench.trainingProgressTitle": "当前运行",
+  "workbench.trainingDetailsTitle": "训练原始明细",
+  "workbench.trainingDetailsHint": "只有在需要排查底层问题时，再展开 JSON 和子进程日志。",
+  "workbench.kpi.epoch": "轮次进度",
+  "workbench.kpi.monitor": "最佳监控指标",
+  "workbench.kpi.trainLoss": "训练总损失",
+  "workbench.kpi.valQuality": "最新验证信号",
+  "workbench.kpi.learningRate": "学习率",
+  "workbench.kpi.balance": "正例占比偏差",
+  "workbench.kpi.runtime": "已耗时 / 预计剩余",
+  "workbench.kpi.threshold": "检测阈值",
   "workbench.galleryEmpty": "先生成预览画廊，再比较多组采样结果。",
   "workbench.samplesEmpty": "先加载运行目录和切分，再浏览 packed 样本。",
   "workbench.trainingIdle": "训练尚未开始。",
@@ -2074,6 +2193,7 @@ const zhOverrides = {
   "workbench.trainingStarted": "训练任务已启动。",
   "workbench.generationStarted": "数据生成任务已启动。",
   "workbench.error.missingTrainConfig": "\u7f3a\u5c11\u8bad\u7ec3\u914d\u7f6e\u8def\u5f84\u3002",
+  "workbench.error.missingRunLookup": "请先填写运行目录或 packed 根目录，再加载已有运行。",
   "workbench.label.seed": "\u79cd\u5b50",
   "workbench.label.events": "\u4e8b\u4ef6",
   "workbench.label.local": "\u5c40\u90e8",
@@ -2200,8 +2320,16 @@ const workbenchDom = {
   startTraining: document.getElementById("wb-start-training"),
   refreshTraining: document.getElementById("wb-refresh-training"),
   trainingStatus: document.getElementById("wb-training-status"),
+  trainingStage: document.getElementById("wb-training-stage"),
+  trainingProgressFill: document.getElementById("wb-training-progress-fill"),
+  trainingProgressMeta: document.getElementById("wb-training-progress-meta"),
+  trainingKpis: document.getElementById("wb-training-kpis"),
   lossCanvas: document.getElementById("wb-loss-canvas"),
-  metricCanvas: document.getElementById("wb-metric-canvas"),
+  qualityCanvas: document.getElementById("wb-quality-canvas"),
+  calibrationCanvas: document.getElementById("wb-calibration-canvas"),
+  lossLegend: document.getElementById("wb-loss-legend"),
+  qualityLegend: document.getElementById("wb-quality-legend"),
+  calibrationLegend: document.getElementById("wb-calibration-legend"),
   trainingSummary: document.getElementById("wb-training-summary"),
   trainingLog: document.getElementById("wb-training-log"),
   datasetWarning: document.getElementById("wb-dataset-warning"),
@@ -2216,10 +2344,20 @@ const workbenchState = {
   currentSample: null,
   currentWindow: null,
   activeInspector: null,
+  trainingJob: null,
+  trainingMetrics: null,
   polling: { generate: null, train: null },
 };
 
 let workbenchEventsBound = false;
+
+function syncWorkbenchWindowStep() {
+  if (!workbenchDom?.contextSize || !workbenchDom?.stride) {
+    return;
+  }
+  const contextSize = Math.max(1, Number(workbenchDom.contextSize.value || 1));
+  workbenchDom.stride.value = String(contextSize);
+}
 
 function initWorkbench(bootstrap) {
   workbenchState.bootstrap = bootstrap ?? {};
@@ -2242,13 +2380,14 @@ function initWorkbench(bootstrap) {
   workbenchDom.overwriteRun.checked = false;
   workbenchDom.previewGallery.innerHTML = `<div class="empty-state">${escapeHtml(t("workbench.galleryEmpty"))}</div>`;
   workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
-  workbenchDom.trainingSummary.textContent = t("workbench.trainingIdle");
-  workbenchDom.trainingLog.textContent = t("workbench.trainingIdle");
   clearCanvas(workbenchDom.sampleCanvas);
   clearCanvas(workbenchDom.windowCanvas);
   clearCanvas(workbenchDom.patchCanvas);
   clearCanvas(workbenchDom.lossCanvas);
-  clearCanvas(workbenchDom.metricCanvas);
+  clearCanvas(workbenchDom.qualityCanvas);
+  clearCanvas(workbenchDom.calibrationCanvas);
+  resetTrainingMonitor();
+  syncWorkbenchWindowStep();
   bindWorkbenchEvents();
 }
 
@@ -2264,6 +2403,8 @@ function bindWorkbenchEvents() {
   workbenchDom.loadSamples?.addEventListener("click", loadSamplesForSplit);
   workbenchDom.previewPackedSample?.addEventListener("click", previewPackedSample);
   workbenchDom.previewWindow?.addEventListener("click", previewPackedWindow);
+  workbenchDom.contextSize?.addEventListener("input", syncWorkbenchWindowStep);
+  workbenchDom.contextSize?.addEventListener("change", syncWorkbenchWindowStep);
   workbenchDom.startTraining?.addEventListener("click", startTrainingJob);
   workbenchDom.refreshTraining?.addEventListener("click", refreshTrainingMetrics);
   workbenchDom.previewGallery?.addEventListener("click", async (event) => {
@@ -2381,6 +2522,9 @@ async function startGenerationJob() {
 async function loadRunInfo(showStatus = false) {
   const runPath = workbenchDom.runPath.value.trim();
   if (!runPath) {
+    if (showStatus) {
+      setStatus(t("workbench.error.missingRunLookup"), "error");
+    }
     return;
   }
   try {
@@ -2402,6 +2546,7 @@ function applyRunInfo(info) {
   workbenchDom.trainConfigPath.value = info.train_config_path ?? "";
   workbenchDom.trainOutputDir.value = info.train_output_dir ?? "";
   workbenchDom.runSummary.textContent = safeJson(info);
+  refreshTrainingMetrics({ silent: true });
   if (info.available_splits?.includes(workbenchDom.splitSelect.value)) {
     loadSamplesForSplit();
   } else if (info.available_splits?.[0]) {
@@ -2441,6 +2586,7 @@ async function previewPackedSample() {
     return;
   }
   try {
+    syncWorkbenchWindowStep();
     const payload = await fetchJson(buildQuery("/api/sample", {
       run_root: workbenchDom.runPath.value.trim(),
       split: workbenchDom.splitSelect.value,
@@ -2449,7 +2595,7 @@ async function previewPackedSample() {
       slice_start: Number(workbenchDom.sliceStart.value || 0),
       slice_end: Number(workbenchDom.sliceEnd.value || 0),
       context_size: Number(workbenchDom.contextSize.value || 512),
-      stride: Number(workbenchDom.stride.value || 256),
+      stride: Number(workbenchDom.stride.value || workbenchDom.contextSize.value || 512),
       patch_size: Number(workbenchDom.patchSize.value || 16),
     }));
     workbenchDom.sampleSelect.value = String(payload.sample_id ?? workbenchDom.sampleSelect.value);
@@ -2479,6 +2625,7 @@ async function previewPackedWindow() {
     return;
   }
   try {
+    syncWorkbenchWindowStep();
     const payload = await fetchJson(buildQuery("/api/window", {
       run_root: workbenchDom.runPath.value.trim(),
       split: workbenchDom.splitSelect.value,
@@ -2486,7 +2633,7 @@ async function previewPackedWindow() {
       feature_index: Number(workbenchDom.featureIndex.value || 0),
       window_index: Number(workbenchDom.windowIndex.value || 0),
       context_size: Number(workbenchDom.contextSize.value || 512),
-      stride: Number(workbenchDom.stride.value || 256),
+      stride: Number(workbenchDom.stride.value || workbenchDom.contextSize.value || 512),
       patch_size: Number(workbenchDom.patchSize.value || 16),
     }));
     workbenchDom.sampleSelect.value = String(payload.sample_id ?? workbenchDom.sampleSelect.value);
@@ -2543,6 +2690,288 @@ function renderSampleStats(values) {
     .join("");
 }
 
+function resetTrainingMonitor() {
+  workbenchState.trainingJob = null;
+  workbenchState.trainingMetrics = null;
+  workbenchDom.trainingStatus.innerHTML = "";
+  workbenchDom.trainingStage.textContent = t("workbench.trainingIdle");
+  workbenchDom.trainingProgressFill.style.width = "0%";
+  workbenchDom.trainingProgressMeta.innerHTML = "";
+  workbenchDom.trainingKpis.innerHTML = `<div class="empty-state">${escapeHtml(t("workbench.trainingIdle"))}</div>`;
+  renderLegendChips(workbenchDom.lossLegend, []);
+  renderLegendChips(workbenchDom.qualityLegend, []);
+  renderLegendChips(workbenchDom.calibrationLegend, []);
+  clearCanvas(workbenchDom.lossCanvas);
+  clearCanvas(workbenchDom.qualityCanvas);
+  clearCanvas(workbenchDom.calibrationCanvas);
+  workbenchDom.trainingSummary.textContent = t("workbench.trainingIdle");
+  workbenchDom.trainingLog.textContent = t("workbench.trainingIdle");
+}
+
+function renderTrainingMonitor() {
+  const job = workbenchState.trainingJob;
+  const metrics = workbenchState.trainingMetrics;
+  const progress = job?.progress ?? metrics?.progress ?? null;
+  const kpis = metrics?.kpis ?? {};
+
+  const statusChips = buildTrainingStatusChips(job);
+  workbenchDom.trainingStatus.innerHTML = statusChips
+    .map((value) => `<span class="stat-pill">${escapeHtml(String(value))}</span>`)
+    .join("");
+
+  const progressRatio = clampUnit(progress?.overall_progress_ratio ?? kpis?.overall_progress_ratio ?? (job?.status === "completed" ? 1 : 0));
+  workbenchDom.trainingStage.textContent = buildTrainingStageText(job, progress, kpis);
+  workbenchDom.trainingProgressFill.style.width = `${(progressRatio * 100).toFixed(1)}%`;
+  workbenchDom.trainingProgressMeta.innerHTML = buildTrainingProgressMeta(progress, kpis)
+    .map((value) => `<span class="stat-pill">${escapeHtml(String(value))}</span>`)
+    .join("");
+
+  renderTrainingKpis(progress, kpis);
+  renderTrainingCharts(metrics);
+
+  const summaryPayload = metrics
+    ? {
+        summary: metrics.summary,
+        progress: metrics.progress,
+        kpis: metrics.kpis,
+        data_quality_report: metrics.data_quality_report?.summary ?? metrics.data_quality_report,
+      }
+    : job?.error
+      ? { error: job.error, result: job.result, progress: job.progress }
+    : job?.progress || job?.artifacts
+      ? {
+          progress: job.progress,
+          artifacts: job.artifacts,
+        }
+      : null;
+  workbenchDom.trainingSummary.textContent = summaryPayload ? safeJson(summaryPayload) : t("workbench.trainingIdle");
+
+  const logs = Array.isArray(job?.logs) ? job.logs : [];
+  workbenchDom.trainingLog.textContent = logs.length ? logs.slice(-160).join("\n") : t("workbench.trainingIdle");
+}
+
+function buildTrainingStatusChips(job) {
+  if (!job) {
+    return [];
+  }
+  return [
+    `${t("workbench.label.job")} ${job.job_id}`,
+    `${t("workbench.label.status")} ${formatTrainingStatus(job.status)}`,
+    job.started_at ? `${t("workbench.label.started")} ${new Date(job.started_at * 1000).toLocaleTimeString()}` : null,
+    job.finished_at ? `${t("workbench.label.finished")} ${new Date(job.finished_at * 1000).toLocaleTimeString()}` : null,
+  ].filter(Boolean);
+}
+
+function buildTrainingProgressMeta(progress, kpis) {
+  const values = [];
+  const epochCurrent = progress?.epoch_current ?? kpis?.epoch_current;
+  const epochTotal = progress?.epoch_total ?? kpis?.epoch_total;
+  if (epochCurrent != null || epochTotal != null) {
+    values.push(`${t("workbench.kpi.epoch")} ${epochCurrent ?? 0}/${epochTotal ?? "-"}`);
+  }
+  if (progress?.split) {
+    values.push(`${formatSplitLabel(progress.split)} ${progress.split_step_current ?? 0}/${progress.split_step_total ?? "-"}`);
+  }
+  if (typeof progress?.learning_rate === "number") {
+    values.push(`${t("workbench.kpi.learningRate")} ${formatLearningRate(progress.learning_rate)}`);
+  }
+  if (typeof progress?.elapsed_seconds === "number") {
+    values.push(`${localizeText("Elapsed", "已耗时")} ${formatDuration(progress.elapsed_seconds)}`);
+  }
+  if (typeof progress?.eta_seconds === "number" && Number.isFinite(progress.eta_seconds)) {
+    values.push(`${localizeText("ETA", "预计剩余")} ${formatDuration(progress.eta_seconds)}`);
+  }
+  if (typeof progress?.overall_progress_ratio === "number") {
+    values.push(formatPercent(progress.overall_progress_ratio));
+  }
+  return values;
+}
+
+function renderTrainingKpis(progress, kpis) {
+  const cards = buildTrainingKpiCards(progress, kpis);
+  if (!cards.length) {
+    workbenchDom.trainingKpis.innerHTML = `<div class="empty-state">${escapeHtml(t("workbench.trainingIdle"))}</div>`;
+    return;
+  }
+  workbenchDom.trainingKpis.innerHTML = cards
+    .map(
+      (card) => `
+        <section class="training-kpi-card" data-tone="${escapeHtml(card.tone ?? "neutral")}">
+          <div class="training-kpi-label">${escapeHtml(card.label)}</div>
+          <div class="training-kpi-value">${escapeHtml(card.value)}</div>
+          <div class="training-kpi-note">${escapeHtml(card.note)}</div>
+        </section>
+      `,
+    )
+    .join("");
+}
+
+function buildTrainingKpiCards(progress, kpis) {
+  const currentSplitMetrics = progress?.current_split_metrics ?? {};
+  const latestTrain = kpis?.latest_train ?? progress?.latest_train_metrics ?? {};
+  const latestVal = kpis?.latest_val ?? progress?.latest_val_metrics ?? {};
+  const monitorMetric = kpis?.monitor_metric ?? progress?.monitor_metric ?? null;
+  const bestMetric = kpis?.best_metric ?? progress?.best_metric ?? null;
+  const latestMonitorValue = kpis?.latest_monitor_value ?? null;
+  const epochCurrent = progress?.epoch_current ?? kpis?.epoch_current ?? null;
+  const epochTotal = progress?.epoch_total ?? kpis?.epoch_total ?? null;
+  const trainLoss = firstDefinedMetric(
+    progress?.split === "train" ? currentSplitMetrics.total_loss : null,
+    latestTrain.total_loss,
+  );
+  const qualityMetricName = pickPreferredMetricName(latestVal, ["f1", "pr_auc", "precision", "recall", "patch_accuracy", "total_loss"]);
+  const qualityMetricValue = qualityMetricName ? latestVal?.[qualityMetricName] : null;
+  const predictedPositiveRate = firstDefinedMetric(
+    progress?.split === "train" ? currentSplitMetrics.predicted_positive_rate : null,
+    latestTrain.predicted_positive_rate,
+    latestVal.predicted_positive_rate,
+  );
+  const targetPositiveRate = firstDefinedMetric(
+    progress?.split === "train" ? currentSplitMetrics.target_positive_rate : null,
+    latestTrain.target_positive_rate,
+    latestVal.target_positive_rate,
+  );
+  const thresholdValue = firstDefinedMetric(
+    currentSplitMetrics.threshold,
+    latestVal.threshold,
+  );
+
+  const cards = [
+    {
+      label: t("workbench.kpi.epoch"),
+      value: `${epochCurrent ?? 0} / ${epochTotal ?? "-"}`,
+      note: buildTrainingStageText(workbenchState.trainingJob, progress, kpis),
+      tone: "accent",
+    },
+    {
+      label: monitorMetric ? `${t("workbench.kpi.monitor")} (${formatMetricLabel(monitorMetric)})` : t("workbench.kpi.monitor"),
+      value: formatMetric(bestMetric),
+      note: latestMonitorValue != null
+        ? `${localizeText("Latest", "最新")} ${formatMetric(latestMonitorValue)}`
+        : localizeText("Waiting for the first monitored value.", "等待首个监控值。"),
+      tone: "blue",
+    },
+    {
+      label: t("workbench.kpi.trainLoss"),
+      value: formatMetric(trainLoss),
+      note: buildTrainLossNote(latestTrain),
+      tone: "accent",
+    },
+    qualityMetricName
+      ? {
+          label: `${t("workbench.kpi.valQuality")} (${formatMetricLabel(qualityMetricName)})`,
+          value: formatMetric(qualityMetricValue),
+          note: buildValidationQualityNote(latestVal),
+          tone: "blue",
+        }
+      : null,
+    {
+      label: t("workbench.kpi.learningRate"),
+      value: formatLearningRate(progress?.learning_rate ?? kpis?.learning_rate),
+      note: localizeText("Updated from the current optimizer state.", "取自当前优化器状态。"),
+      tone: "neutral",
+    },
+    predictedPositiveRate != null && targetPositiveRate != null
+      ? {
+          label: t("workbench.kpi.balance"),
+          value: formatSignedPercent(predictedPositiveRate - targetPositiveRate),
+          note: `${localizeText("pred", "预测")} ${formatPercent(predictedPositiveRate)} · ${localizeText("target", "目标")} ${formatPercent(targetPositiveRate)}`,
+          tone: "neutral",
+        }
+      : null,
+    thresholdValue != null
+      ? {
+          label: t("workbench.kpi.threshold"),
+          value: formatMetric(thresholdValue),
+          note: localizeText("Latest validation threshold snapshot.", "最新验证阈值快照。"),
+          tone: "neutral",
+        }
+      : null,
+    {
+      label: t("workbench.kpi.runtime"),
+      value: formatDuration(progress?.elapsed_seconds ?? kpis?.elapsed_seconds),
+      note: typeof (progress?.eta_seconds ?? kpis?.eta_seconds) === "number"
+        ? `${localizeText("ETA", "预计剩余")} ${formatDuration(progress?.eta_seconds ?? kpis?.eta_seconds)}`
+        : localizeText("No ETA yet.", "暂无剩余时间估计。"),
+      tone: "neutral",
+    },
+  ];
+  return cards.filter(Boolean);
+}
+
+function buildTrainLossNote(metrics) {
+  if (!metrics || typeof metrics !== "object") {
+    return localizeText("Waiting for the first train epoch.", "等待首个训练轮次结果。");
+  }
+  const parts = [];
+  if (typeof metrics.anomaly_loss === "number") {
+    parts.push(`${formatMetricLabel("anomaly_loss")} ${formatMetric(metrics.anomaly_loss)}`);
+  }
+  if (typeof metrics.reconstruction_loss === "number") {
+    parts.push(`${formatMetricLabel("reconstruction_loss")} ${formatMetric(metrics.reconstruction_loss)}`);
+  }
+  if (typeof metrics.patch_accuracy === "number") {
+    parts.push(`${formatMetricLabel("patch_accuracy")} ${formatPercent(metrics.patch_accuracy)}`);
+  }
+  return parts.join(" · ") || localizeText("Train metrics are accumulating.", "训练指标正在累积。");
+}
+
+function buildValidationQualityNote(metrics) {
+  if (!metrics || typeof metrics !== "object") {
+    return localizeText("Validation has not finished yet.", "验证还没有结束。");
+  }
+  const parts = [];
+  if (typeof metrics.precision === "number") {
+    parts.push(`${formatMetricLabel("precision")} ${formatMetric(metrics.precision)}`);
+  }
+  if (typeof metrics.recall === "number") {
+    parts.push(`${formatMetricLabel("recall")} ${formatMetric(metrics.recall)}`);
+  }
+  if (typeof metrics.pr_auc === "number") {
+    parts.push(`${formatMetricLabel("pr_auc")} ${formatMetric(metrics.pr_auc)}`);
+  }
+  return parts.join(" · ") || localizeText("Only the latest validation snapshot is available.", "当前只拿到了最新一份验证快照。");
+}
+
+function renderTrainingCharts(metricsPayload) {
+  const historyView = metricsPayload?.history_view ?? {};
+  renderTrainingChart(
+    workbenchDom.lossCanvas,
+    workbenchDom.lossLegend,
+    historyView,
+    historyView.chart_groups?.loss ?? (historyView.preferred_loss ? [historyView.preferred_loss] : []),
+  );
+  renderTrainingChart(
+    workbenchDom.qualityCanvas,
+    workbenchDom.qualityLegend,
+    historyView,
+    historyView.chart_groups?.quality ?? (historyView.preferred_quality ? [historyView.preferred_quality] : []),
+  );
+  renderTrainingChart(
+    workbenchDom.calibrationCanvas,
+    workbenchDom.calibrationLegend,
+    historyView,
+    historyView.chart_groups?.calibration ?? [],
+  );
+}
+
+function renderTrainingChart(canvas, legendContainer, historyView, metricNames) {
+  const activeMetricNames = (metricNames ?? []).filter((name) => Array.isArray(historyView?.series?.[name]));
+  if (!activeMetricNames.length) {
+    clearCanvas(canvas);
+    renderLegendChips(legendContainer, []);
+    return;
+  }
+  drawMetricChart(canvas, historyView.epochs ?? [], historyView.series ?? {}, activeMetricNames);
+  renderLegendChips(
+    legendContainer,
+    activeMetricNames.map((name, index) => ({
+      color: palette[index % palette.length],
+      label: formatSplitMetricLabel(name),
+    })),
+  );
+}
+
 async function startTrainingJob() {
   const configPath = workbenchDom.trainConfigPath.value.trim();
   if (!configPath) {
@@ -2557,6 +2986,8 @@ async function startTrainingJob() {
       inspect_data: workbenchDom.inspectData.checked,
       inspect_max_samples: Number(workbenchDom.inspectMaxSamples.value || 0) || undefined,
     });
+    resetTrainingMonitor();
+    workbenchDom.trainingStage.textContent = t("workbench.trainingStarted");
     setStatus(t("workbench.trainingStarted"), "ok");
     pollJob("train", payload.job_id);
   } catch (error) {
@@ -2574,7 +3005,13 @@ function pollJob(kind, jobId) {
       if (kind === "generate") {
         workbenchDom.runSummary.textContent = safeJson(payload.result ?? { status: payload.status, logs: payload.logs?.slice(-30) ?? [] });
       } else if (kind === "train") {
+        if (payload.artifacts?.output_dir) {
+          workbenchDom.trainOutputDir.value = payload.artifacts.output_dir;
+        }
         renderTrainingJob(payload);
+        if (payload.artifacts?.output_dir || workbenchDom.trainOutputDir.value.trim() || workbenchDom.runPath.value.trim()) {
+          await refreshTrainingMetrics({ silent: true });
+        }
       }
       if (payload.status === "completed") {
         window.clearInterval(workbenchState.polling[kind]);
@@ -2584,7 +3021,7 @@ function pollJob(kind, jobId) {
         }
         if (kind === "train" && payload.result) {
           workbenchDom.trainOutputDir.value = payload.result.output_dir ?? workbenchDom.trainOutputDir.value;
-          refreshTrainingMetrics();
+          await refreshTrainingMetrics();
         }
       }
       if (payload.status === "failed") {
@@ -2602,22 +3039,12 @@ function pollJob(kind, jobId) {
 }
 
 function renderTrainingJob(job) {
-  const chips = [
-    `${t("workbench.label.job")} ${job.job_id}`,
-    `${t("workbench.label.status")} ${job.status}`,
-    job.started_at ? `${t("workbench.label.started")} ${new Date(job.started_at * 1000).toLocaleTimeString()}` : null,
-    job.finished_at ? `${t("workbench.label.finished")} ${new Date(job.finished_at * 1000).toLocaleTimeString()}` : null,
-  ].filter(Boolean);
-  workbenchDom.trainingStatus.innerHTML = chips
-    .map((value) => `<span class="stat-pill">${escapeHtml(String(value))}</span>`)
-    .join("");
-  workbenchDom.trainingLog.textContent = (job.logs ?? []).slice(-120).join("\n");
-  if (job.error) {
-    workbenchDom.trainingSummary.textContent = safeJson({ error: job.error, result: job.result });
-  }
+  workbenchState.trainingJob = job;
+  renderTrainingMonitor();
 }
 
-async function refreshTrainingMetrics() {
+async function refreshTrainingMetrics(options = {}) {
+  const { silent = false } = options;
   const outputDir = workbenchDom.trainOutputDir.value.trim();
   const runRoot = workbenchDom.runPath.value.trim();
   if (!outputDir && !runRoot) {
@@ -2628,19 +3055,15 @@ async function refreshTrainingMetrics() {
       output_dir: outputDir,
       run_root: runRoot,
     }));
-    workbenchDom.trainingSummary.textContent = safeJson({
-      summary: payload.summary,
-      data_quality_report: payload.data_quality_report?.summary ?? payload.data_quality_report,
-    });
-    const historyView = payload.history_view ?? {};
-    if (historyView.preferred_loss) {
-      drawMetricChart(workbenchDom.lossCanvas, historyView.epochs ?? [], historyView.series ?? {}, [historyView.preferred_loss]);
+    workbenchState.trainingMetrics = payload;
+    if (payload.output_dir) {
+      workbenchDom.trainOutputDir.value = payload.output_dir;
     }
-    if (historyView.preferred_quality) {
-      drawMetricChart(workbenchDom.metricCanvas, historyView.epochs ?? [], historyView.series ?? {}, [historyView.preferred_quality]);
-    }
+    renderTrainingMonitor();
   } catch (error) {
-    workbenchDom.trainingSummary.textContent = safeJson({ error: error.message ?? String(error) });
+    if (!silent) {
+      workbenchDom.trainingSummary.textContent = safeJson({ error: error.message ?? String(error) });
+    }
   }
 }
 
@@ -2678,6 +3101,155 @@ function buildQuery(path, params) {
 
 function safeJson(value) {
   return JSON.stringify(value, null, 2);
+}
+
+function clampUnit(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function firstDefinedMetric(...values) {
+  for (const value of values) {
+    if (typeof value === "number" && !Number.isNaN(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function pickPreferredMetricName(metrics, names) {
+  if (!metrics || typeof metrics !== "object") {
+    return null;
+  }
+  return (names ?? []).find((name) => typeof metrics[name] === "number") ?? null;
+}
+
+function formatSplitLabel(split) {
+  if (split === "train") {
+    return localizeText("Train", "训练");
+  }
+  if (split === "val") {
+    return localizeText("Validation", "验证");
+  }
+  if (split === "test") {
+    return localizeText("Test", "测试");
+  }
+  return String(split ?? "");
+}
+
+function formatTrainingStatus(status) {
+  if (status === "running") {
+    return localizeText("running", "运行中");
+  }
+  if (status === "completed") {
+    return localizeText("completed", "已完成");
+  }
+  if (status === "failed") {
+    return localizeText("failed", "失败");
+  }
+  if (status === "pending") {
+    return localizeText("pending", "等待中");
+  }
+  return String(status ?? "-");
+}
+
+function buildTrainingStageText(job, progress, kpis) {
+  if (job?.error) {
+    return localizeText("Training failed. Inspect the raw details below.", "训练失败，请展开下方原始明细排查。");
+  }
+  const status = job?.status ?? progress?.status ?? kpis?.status ?? null;
+  const stage = progress?.stage ?? kpis?.stage ?? null;
+  const epochCurrent = progress?.epoch_current ?? kpis?.epoch_current ?? null;
+  const epochTotal = progress?.epoch_total ?? kpis?.epoch_total ?? null;
+  if (!status && !stage && epochCurrent == null) {
+    return t("workbench.trainingIdle");
+  }
+  if (!job && !status && !stage && epochCurrent != null) {
+    return localizeText(
+      `Loaded saved metrics through epoch ${epochCurrent}${epochTotal != null ? `/${epochTotal}` : ""}.`,
+      `已加载到第 ${epochCurrent}${epochTotal != null ? ` / ${epochTotal}` : ""} 轮的历史指标。`,
+    );
+  }
+  if (status === "completed") {
+    return localizeText(
+      `Training completed at epoch ${epochCurrent ?? "-"}/${epochTotal ?? "-"}.`,
+      `训练已完成，结束于第 ${epochCurrent ?? "-"} / ${epochTotal ?? "-"} 轮。`,
+    );
+  }
+  if (stage === "validation") {
+    return localizeText(
+      `Running validation for epoch ${epochCurrent ?? "-"}/${epochTotal ?? "-"}.`,
+      `正在执行第 ${epochCurrent ?? "-"} / ${epochTotal ?? "-"} 轮验证。`,
+    );
+  }
+  if (stage === "epoch_complete") {
+    return localizeText(
+      `Epoch ${epochCurrent ?? "-"}/${epochTotal ?? "-"} finished. Waiting for the next update.`,
+      `第 ${epochCurrent ?? "-"} / ${epochTotal ?? "-"} 轮已结束，等待下一次更新。`,
+    );
+  }
+  if (stage === "starting" || status === "pending") {
+    return localizeText("Training job has started. Waiting for the first step.", "训练任务已启动，等待第一批进度。");
+  }
+  return localizeText(
+    `Training epoch ${epochCurrent ?? "-"}/${epochTotal ?? "-"}.`,
+    `正在训练第 ${epochCurrent ?? "-"} / ${epochTotal ?? "-"} 轮。`,
+  );
+}
+
+function formatMetricLabel(metricName) {
+  const key = String(metricName ?? "").includes(".") ? String(metricName).split(".").slice(1).join(".") : String(metricName ?? "");
+  return METRIC_LABELS[state.locale]?.[key]
+    ?? METRIC_LABELS.en[key]
+    ?? key.replace(/_/g, " ");
+}
+
+function formatSplitMetricLabel(metricName) {
+  const [split, rawName] = String(metricName ?? "").split(".", 2);
+  if (!rawName) {
+    return formatMetricLabel(split);
+  }
+  return `${formatSplitLabel(split)} ${formatMetricLabel(rawName)}`;
+}
+
+function formatPercent(value, digits = 1) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatSignedPercent(value, digits = 1) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(digits)}pp`;
+}
+
+function formatLearningRate(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  if (Math.abs(value) >= 0.001) {
+    return value.toFixed(5);
+  }
+  return value.toExponential(2);
+}
+
+function formatDuration(value) {
+  if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
+    return "-";
+  }
+  const totalSeconds = Math.round(value);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, "0")))
+    .join(":");
 }
 
 function drawSeriesPairChart(canvas, primary, reference, mask, paddingMask) {
@@ -2773,36 +3345,43 @@ function drawMetricChart(canvas, epochs, seriesMap, metricNames) {
   let minValue = Math.min(...values);
   let maxValue = Math.max(...values);
   if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || Math.abs(maxValue - minValue) < 1e-8) {
-    minValue -= 1;
-    maxValue += 1;
+    minValue = 0;
+    maxValue = 1;
   }
   const padding = { left: 56, right: 20, top: 18, bottom: 34 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  drawAxes(context, padding, width, height, minValue, maxValue, Math.max(epochs.length, 1));
+  drawAxes(context, padding, width, height, minValue, maxValue, Math.max(epochs.length, 1), {
+    xStartLabel: epochs.length ? `e${epochs[0]}` : "e1",
+    xEndLabel: epochs.length ? `e${epochs[epochs.length - 1]}` : "e1",
+  });
   activeNames.forEach((name, index) => {
     const valuesForLine = seriesMap[name].map((value) => (Number.isFinite(value) ? value : null));
     context.strokeStyle = palette[index % palette.length];
     context.lineWidth = 2;
-    context.beginPath();
+    let previousPoint = null;
     valuesForLine.forEach((value, pointIndex) => {
       if (value == null) {
+        previousPoint = null;
         return;
       }
       const x = padding.left + (pointIndex / Math.max(1, valuesForLine.length - 1)) * plotWidth;
       const ratio = (value - minValue) / Math.max(1e-8, maxValue - minValue);
       const y = padding.top + plotHeight - ratio * plotHeight;
-      if (pointIndex === 0) {
+      if (previousPoint == null) {
+        context.beginPath();
         context.moveTo(x, y);
       } else {
+        context.beginPath();
+        context.moveTo(previousPoint.x, previousPoint.y);
         context.lineTo(x, y);
+        context.stroke();
       }
+      context.fillStyle = palette[index % palette.length];
+      context.beginPath();
+      context.arc(x, y, 2.6, 0, Math.PI * 2);
+      context.fill();
+      previousPoint = { x, y };
     });
-    context.stroke();
   });
 }
-
-
-
-
-

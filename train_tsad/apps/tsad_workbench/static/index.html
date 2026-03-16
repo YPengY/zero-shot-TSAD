@@ -84,6 +84,7 @@
                     </div>
                   </div>
                   <div id="series-badges" class="hero-badges"></div>
+                  <div id="series-legend" class="series-legend"></div>
                   <canvas id="series-canvas" width="980" height="460"></canvas>
                   <div id="series-footer" class="series-footer"></div>
                 </div>
@@ -297,8 +298,7 @@
               </label>
             </div>
             <div class="workflow-actions">
-              <button id="wb-generate-submit" class="primary" data-i18n="workbench.generateAction">Generate + Pack</button>
-              <button id="wb-load-run" class="secondary" data-i18n="workbench.loadRun">Load Existing Run</button>
+              <button id="wb-generate-submit" type="button" class="primary" data-i18n="workbench.generateAction">Generate + Pack</button>
             </div>
             <pre id="wb-run-summary" class="json-box compact-box"></pre>
           </section>
@@ -318,7 +318,12 @@
             <div class="workflow-grid">
               <label class="field-lite field-span-2">
                 <span data-i18n="workbench.runPath">Run Or Packed Root</span>
-                <input id="wb-run-path" type="text" />
+                <div class="field-inline-action">
+                  <input id="wb-run-path" type="text" />
+                  <button id="wb-load-run" type="button" class="secondary inline-action-button" data-i18n="workbench.loadRun">
+                    Load Existing Run
+                  </button>
+                </div>
               </label>
               <label class="field-lite">
                 <span data-i18n="workbench.split">Split</span>
@@ -350,7 +355,7 @@
               </label>
               <label class="field-lite">
                 <span data-i18n="workbench.stride">Stride</span>
-                <input id="wb-stride" type="number" min="1" value="256" />
+                <input id="wb-stride" type="number" min="1" value="512" readonly />
               </label>
               <label class="field-lite">
                 <span data-i18n="workbench.patchSize">Patch Size</span>
@@ -361,6 +366,9 @@
                 <input id="wb-window-index" type="number" min="0" value="0" />
               </label>
             </div>
+            <p class="subtle compact" data-i18n="workbench.windowRuleHint">
+              Uses non-overlapping full windows only. Tail remainder and short samples are discarded.
+            </p>
             <div class="workflow-actions">
               <button id="wb-load-samples" class="secondary" data-i18n="workbench.loadSamples">Load Samples</button>
               <button id="wb-preview-packed-sample" class="secondary" data-i18n="workbench.previewPackedSample">Preview Sample Slice</button>
@@ -423,17 +431,82 @@
               <button id="wb-start-training" class="primary" data-i18n="workbench.startTraining">Start Training</button>
               <button id="wb-refresh-training" class="secondary" data-i18n="workbench.refreshTraining">Refresh Metrics</button>
             </div>
-            <div id="wb-training-status" class="dataset-stats"></div>
-            <div class="canvas-card compact-canvas-card">
-              <h3 data-i18n="workbench.lossCanvasTitle">Loss Curve</h3>
-              <canvas id="wb-loss-canvas" width="980" height="220"></canvas>
+            <div class="training-monitor">
+              <section class="canvas-card training-progress-card">
+                <div class="training-progress-header">
+                  <div>
+                    <p class="hero-kicker compact-kicker" data-i18n="workbench.trainingProgressEyebrow">Live Progress</p>
+                    <h3 data-i18n="workbench.trainingProgressTitle">Current Run</h3>
+                    <p id="wb-training-stage" class="subtle compact" data-i18n="workbench.trainingIdle">
+                      Training has not started yet.
+                    </p>
+                  </div>
+                  <div id="wb-training-status" class="dataset-stats training-status-pills"></div>
+                </div>
+                <div class="training-progress-bar" aria-hidden="true">
+                  <div id="wb-training-progress-fill" class="training-progress-fill"></div>
+                </div>
+                <div id="wb-training-progress-meta" class="training-progress-meta"></div>
+              </section>
+
+              <div id="wb-training-kpis" class="training-kpi-grid"></div>
+
+              <div class="training-chart-grid">
+                <div class="canvas-card compact-canvas-card training-chart-card">
+                  <div class="training-chart-header">
+                    <div>
+                      <h3 data-i18n="workbench.lossCanvasTitle">Loss Curve</h3>
+                      <p class="subtle compact" data-i18n="workbench.lossCanvasHint">
+                        Track total, anomaly, and reconstruction loss together.
+                      </p>
+                    </div>
+                    <div id="wb-loss-legend" class="chart-legend"></div>
+                  </div>
+                  <canvas id="wb-loss-canvas" width="980" height="240"></canvas>
+                </div>
+
+                <div class="canvas-card compact-canvas-card training-chart-card">
+                  <div class="training-chart-header">
+                    <div>
+                      <h3 data-i18n="workbench.metricCanvasTitle">Validation Curve</h3>
+                      <p class="subtle compact" data-i18n="workbench.metricCanvasHint">
+                        Watch detection quality move instead of waiting for the final summary.
+                      </p>
+                    </div>
+                    <div id="wb-quality-legend" class="chart-legend"></div>
+                  </div>
+                  <canvas id="wb-quality-canvas" width="980" height="240"></canvas>
+                </div>
+
+                <div class="canvas-card compact-canvas-card training-chart-card">
+                  <div class="training-chart-header">
+                    <div>
+                      <h3 data-i18n="workbench.calibrationCanvasTitle">Behavior And Calibration</h3>
+                      <p class="subtle compact" data-i18n="workbench.calibrationCanvasHint">
+                        Compare target ratio, predicted ratio, threshold, and mask usage.
+                      </p>
+                    </div>
+                    <div id="wb-calibration-legend" class="chart-legend"></div>
+                  </div>
+                  <canvas id="wb-calibration-canvas" width="980" height="240"></canvas>
+                </div>
+              </div>
+
+              <details class="inspector-card training-details-card">
+                <summary class="metadata-raw-summary training-details-summary">
+                  <div>
+                    <h3 data-i18n="workbench.trainingDetailsTitle">Raw Training Details</h3>
+                    <p class="subtle" data-i18n="workbench.trainingDetailsHint">
+                      Open JSON and subprocess logs only when you need low-level debugging detail.
+                    </p>
+                  </div>
+                </summary>
+                <div class="training-detail-grid">
+                  <pre id="wb-training-summary" class="json-box compact-box"></pre>
+                  <pre id="wb-training-log" class="json-box compact-box log-box"></pre>
+                </div>
+              </details>
             </div>
-            <div class="canvas-card compact-canvas-card">
-              <h3 data-i18n="workbench.metricCanvasTitle">Validation Curve</h3>
-              <canvas id="wb-metric-canvas" width="980" height="220"></canvas>
-            </div>
-            <pre id="wb-training-summary" class="json-box compact-box"></pre>
-            <pre id="wb-training-log" class="json-box compact-box log-box"></pre>
           </section>
         </div>
       </section>
@@ -464,6 +537,3 @@
     <script src="./app.js" type="module"></script>
   </body>
 </html>
-
-
-

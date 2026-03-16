@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -95,7 +96,24 @@ class CheckpointManager:
         """Persist auxiliary JSON artifact (history, summary, config snapshot)."""
 
         path = self.output_dir / filename
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        temp_path = path.with_suffix(f"{path.suffix}.tmp")
+        serialized = json.dumps(payload, indent=2, ensure_ascii=False)
+        temp_path.write_text(serialized, encoding="utf-8")
+
+        for attempt in range(6):
+            try:
+                temp_path.replace(path)
+                return path
+            except PermissionError:
+                if attempt == 5:
+                    break
+                time.sleep(0.05 * (attempt + 1))
+
+        # Windows may deny atomic replace while another process briefly reads the file.
+        # Fall back to direct overwrite so progress reporting does not abort training.
+        path.write_text(serialized, encoding="utf-8")
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
         return path
 
 

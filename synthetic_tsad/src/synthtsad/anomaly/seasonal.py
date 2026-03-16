@@ -778,9 +778,10 @@ class SeasonalAnomalyInjector:
         t_end: int,
         placements: dict[int, list[tuple[int, int]]],
         counts: dict[int, int],
+        max_events_per_node: int,
     ) -> bool:
         policy = self._placement_policy()
-        if counts.get(node, 0) >= int(policy.max_events_per_node):
+        if counts.get(node, 0) >= max_events_per_node:
             return False
         if bool(policy.allow_overlap):
             return True
@@ -789,6 +790,9 @@ class SeasonalAnomalyInjector:
             if not (t_end + min_gap <= start or t_start >= end + min_gap):
                 return False
         return True
+
+    def _resolved_node_event_cap(self, n: int) -> int:
+        return self._placement_policy().resolve_max_events_per_node(sequence_length=n)
 
     def sample_events(
         self,
@@ -808,6 +812,9 @@ class SeasonalAnomalyInjector:
         placements: dict[int, list[tuple[int, int]]] = {node: [] for node in nodes}
         counts: dict[int, int] = {node: 0 for node in nodes}
         count = seasonal_cfg.events_per_sample.sample(rng)
+        max_events_per_node = self._resolved_node_event_cap(n)
+        if max_events_per_node <= 0:
+            return []
         events: list[AnomalyEvent] = []
 
         for _ in range(count):
@@ -828,7 +835,12 @@ class SeasonalAnomalyInjector:
                 spec = seasonal_cfg.per_type[kind]
                 t_start, t_end = self._sample_window(n, rng, spec=spec)
                 if not self._can_place(
-                    node=node, t_start=t_start, t_end=t_end, placements=placements, counts=counts
+                    node=node,
+                    t_start=t_start,
+                    t_end=t_end,
+                    placements=placements,
+                    counts=counts,
+                    max_events_per_node=max_events_per_node,
                 ):
                     continue
                 handler = self._handler_for_kind(kind)
