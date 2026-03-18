@@ -69,9 +69,13 @@ class Batch:
 
     Shape conventions:
     - `inputs`: [B, W, D]
+    - `valid_lengths`: [B]
     - `patch_labels`: [B, N_patches, D] when available
     - `reconstruction_targets`: shape defined by the masking/reconstruction path
     - `mask_indices`: boolean mask aligned with the reconstruction path
+    - `point_valid_mask`: [B, W, D] marks non-padding points
+    - `patch_valid_mask`: [B, N_patches, D] marks non-padding patch-feature units
+    - `token_padding_mask`: [B, N_patches * D] for Transformer attention masking
     - `point_masks`: [B, W, D] when available
     - `point_mask_any`: [B, W] when available
     """
@@ -79,32 +83,71 @@ class Batch:
     sample_ids: list[str]
     context_start: "torch.Tensor"
     context_end: "torch.Tensor"
+    valid_lengths: "torch.Tensor"
     inputs: "torch.Tensor"
     patch_labels: "torch.Tensor | None" = None
     reconstruction_targets: "torch.Tensor | None" = None
     mask_indices: "torch.Tensor | None" = None
+    point_valid_mask: "torch.Tensor | None" = None
+    patch_valid_mask: "torch.Tensor | None" = None
+    token_padding_mask: "torch.Tensor | None" = None
     point_masks: "torch.Tensor | None" = None
     point_mask_any: "torch.Tensor | None" = None
     metadata: Metadata = field(default_factory=dict)
 
-    def to(self, device: "str | torch.device") -> Batch:
+    def to(
+        self,
+        device: "str | torch.device",
+        *,
+        non_blocking: bool = False,
+    ) -> Batch:
         """Return a copy with all tensor fields moved to `device`."""
 
         return replace(
             self,
-            context_start=self.context_start.to(device),
-            context_end=self.context_end.to(device),
-            inputs=self.inputs.to(device),
-            patch_labels=self.patch_labels.to(device) if self.patch_labels is not None else None,
+            context_start=self.context_start.to(device, non_blocking=non_blocking),
+            context_end=self.context_end.to(device, non_blocking=non_blocking),
+            valid_lengths=self.valid_lengths.to(device, non_blocking=non_blocking),
+            inputs=self.inputs.to(device, non_blocking=non_blocking),
+            patch_labels=(
+                self.patch_labels.to(device, non_blocking=non_blocking)
+                if self.patch_labels is not None
+                else None
+            ),
             reconstruction_targets=(
-                self.reconstruction_targets.to(device)
+                self.reconstruction_targets.to(device, non_blocking=non_blocking)
                 if self.reconstruction_targets is not None
                 else None
             ),
-            mask_indices=self.mask_indices.to(device) if self.mask_indices is not None else None,
-            point_masks=self.point_masks.to(device) if self.point_masks is not None else None,
+            mask_indices=(
+                self.mask_indices.to(device, non_blocking=non_blocking)
+                if self.mask_indices is not None
+                else None
+            ),
+            point_valid_mask=(
+                self.point_valid_mask.to(device, non_blocking=non_blocking)
+                if self.point_valid_mask is not None
+                else None
+            ),
+            patch_valid_mask=(
+                self.patch_valid_mask.to(device, non_blocking=non_blocking)
+                if self.patch_valid_mask is not None
+                else None
+            ),
+            token_padding_mask=(
+                self.token_padding_mask.to(device, non_blocking=non_blocking)
+                if self.token_padding_mask is not None
+                else None
+            ),
+            point_masks=(
+                self.point_masks.to(device, non_blocking=non_blocking)
+                if self.point_masks is not None
+                else None
+            ),
             point_mask_any=(
-                self.point_mask_any.to(device) if self.point_mask_any is not None else None
+                self.point_mask_any.to(device, non_blocking=non_blocking)
+                if self.point_mask_any is not None
+                else None
             ),
         )
 
@@ -115,10 +158,12 @@ class ModelOutput:
 
     Shape conventions:
     - `logits`: [B, N_patches, D]
+    - `point_logits`: [B, W, D] when anomaly scores are projected to observation space
     - `reconstruction`: must align with `Batch.reconstruction_targets` when used
     """
 
     logits: "torch.Tensor"
+    point_logits: "torch.Tensor | None" = None
     reconstruction: "torch.Tensor | None" = None
 
 
@@ -145,7 +190,19 @@ class DatasetProtocol(Protocol):
 class ContextWindowizerProtocol(Protocol):
     """Protocol for slicing full sequences into context windows."""
 
+    def iter_context_bounds(self, sequence_length: int) -> Sequence[tuple[int, int]]:
+        ...
+
     def transform(self, sample: RawSample) -> Sequence[ContextWindowSample]:
+        ...
+
+    def slice_window(
+        self,
+        sample: RawSample,
+        *,
+        start: int,
+        end: int,
+    ) -> ContextWindowSample:
         ...
 
 

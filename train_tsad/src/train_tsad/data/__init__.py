@@ -1,7 +1,12 @@
 """Data loading, windowizing, batching, and data-quality diagnostics for synthetic corpora."""
 
 from .collate import ContextWindowCollator
-from .dataset import ContextWindowDataset, ShardedSyntheticTsadDataset, SyntheticTsadDataset
+from .dataset import (
+    ContextWindowDataset,
+    ShardedSyntheticTsadDataset,
+    SyntheticTsadDataset,
+    WindowShardedTsadDataset,
+)
 from .quality import (
     DataQualityInspector,
     DataQualityThresholds,
@@ -9,6 +14,7 @@ from .quality import (
     QualityIssue,
     SplitQualityReport,
 )
+from .sampler import GroupedWindowSampler
 from .transforms import MaskingTargets, RandomPatchMaskingTransform
 from .windowizer import SlidingContextWindowizer
 
@@ -18,6 +24,7 @@ __all__ = [
     "DataQualityInspector",
     "DataQualityThresholds",
     "DatasetQualityReport",
+    "GroupedWindowSampler",
     "MaskingTargets",
     "QualityIssue",
     "RandomPatchMaskingTransform",
@@ -25,4 +32,5 @@ __all__ = [
     "SlidingContextWindowizer",
     "SplitQualityReport",
     "SyntheticTsadDataset",
+    "WindowShardedTsadDataset",
 ]

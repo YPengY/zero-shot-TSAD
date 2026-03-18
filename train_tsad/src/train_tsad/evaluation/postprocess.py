@@ -20,6 +20,21 @@ def reduce_patch_scores(patch_scores: np.ndarray, *, reduction: str = "mean") ->
     raise ValueError(f"Unsupported score reduction `{reduction}`. Supported: mean, max.")
 
 
+def reduce_point_feature_scores(point_scores: np.ndarray, *, reduction: str = "mean") -> np.ndarray:
+    """Reduce per-feature point scores `[W, D]` to scalar point scores `[W]`."""
+
+    scores = np.asarray(point_scores, dtype=np.float32)
+    if scores.ndim != 2:
+        raise ValueError(f"`point_scores` must have shape [W, D], got {scores.shape}.")
+
+    mode = reduction.lower()
+    if mode == "mean":
+        return scores.mean(axis=1)
+    if mode == "max":
+        return scores.max(axis=1)
+    raise ValueError(f"Unsupported score reduction `{reduction}`. Supported: mean, max.")
+
+
 def patch_scores_to_point_scores(patch_scores: np.ndarray, *, patch_size: int) -> np.ndarray:
     """Expand scalar patch scores `[N_patches]` to point scores `[W]`."""
 
@@ -44,13 +59,101 @@ class PatchFeatureRecord:
 
 
 @dataclass(slots=True)
+class _PatchFeatureSampleState:
+    """Per-sample patch-feature buffers keyed by absolute patch start."""
+
+    aggregation: str
+    patch_size: int
+    num_features: int
+    score_buffer: dict[int, np.ndarray] = field(default_factory=dict)
+    count_buffer: dict[int, int] = field(default_factory=dict)
+    target_buffer: dict[int, np.ndarray] = field(default_factory=dict)
+    observed_end: int = 0
+
+    def update(
+        self,
+        *,
+        context_start: int,
+        context_end: int,
+        patch_scores: np.ndarray,
+        patch_targets: np.ndarray,
+    ) -> None:
+        """Merge one window into this sample state."""
+
+        if context_start < 0 or context_end < context_start:
+            raise ValueError(
+                f"Invalid context bounds for patch aggregation: start={context_start}, end={context_end}."
+            )
+
+        scores = np.asarray(patch_scores, dtype=np.float32)
+        targets = np.asarray(patch_targets, dtype=np.uint8)
+        if scores.ndim != 2 or targets.ndim != 2:
+            raise ValueError("`patch_scores` and `patch_targets` must have shape [N_patches, D].")
+        if scores.shape != targets.shape:
+            raise ValueError(
+                "`patch_scores` and `patch_targets` must share the same shape. "
+                f"Got {scores.shape} vs {targets.shape}."
+            )
+        if scores.shape[1] != self.num_features:
+            raise ValueError(
+                "`patch_scores.shape[1]` must match state feature count. "
+                f"Got {scores.shape[1]} vs {self.num_features}."
+            )
+
+        targets_binary = (targets > 0).astype(np.uint8, copy=False)
+        for patch_index in range(scores.shape[0]):
+            patch_start = context_start + patch_index * self.patch_size
+            if patch_start >= context_end:
+                break
+
+            score_row = scores[patch_index]
+            target_row = targets_binary[patch_index]
+
+            cached_scores = self.score_buffer.get(patch_start)
+            if cached_scores is None:
+                self.score_buffer[patch_start] = score_row.astype(np.float32, copy=True)
+                self.target_buffer[patch_start] = target_row.copy()
+                self.count_buffer[patch_start] = 1
+                continue
+
+            if self.aggregation == "mean":
+                cached_scores += score_row
+                self.count_buffer[patch_start] = self.count_buffer.get(patch_start, 0) + 1
+            elif self.aggregation == "max":
+                np.maximum(cached_scores, score_row, out=cached_scores)
+            else:
+                raise ValueError(
+                    f"Unsupported patch-feature aggregation `{self.aggregation}`. "
+                    "Supported: mean, max."
+                )
+
+            np.maximum(
+                self.target_buffer[patch_start],
+                target_row,
+                out=self.target_buffer[patch_start],
+            )
+
+        self.observed_end = max(self.observed_end, int(context_end))
+
+    def finalized_patch_rows(self) -> tuple[tuple[int, np.ndarray, np.ndarray], ...]:
+        """Return sorted `(patch_start, score_row, target_row)` rows."""
+
+        rows: list[tuple[int, np.ndarray, np.ndarray]] = []
+        for patch_start in sorted(self.score_buffer):
+            score_row = self.score_buffer[patch_start]
+            if self.aggregation == "mean":
+                score_row = score_row / max(self.count_buffer.get(patch_start, 1), 1)
+            target_row = self.target_buffer[patch_start]
+            rows.append((patch_start, score_row, target_row))
+        return tuple(rows)
+
+
+@dataclass(slots=True)
 class PatchFeatureAccumulator:
     """Aggregate patch-feature scores back to absolute sample patch regions."""
 
     aggregation: str = "mean"
-    score_buffer: dict[tuple[str, int, int, int], float] = field(default_factory=dict)
-    count_buffer: dict[tuple[str, int, int, int], int] = field(default_factory=dict)
-    target_buffer: dict[tuple[str, int, int, int], int] = field(default_factory=dict)
+    sample_states: dict[str, _PatchFeatureSampleState] = field(default_factory=dict)
 
     def update(
         self,
@@ -76,56 +179,86 @@ class PatchFeatureAccumulator:
                 "`patch_scores` and `patch_targets` must share the same shape. "
                 f"Got {scores.shape} vs {targets.shape}."
             )
-        if context_start < 0 or context_end < context_start:
+
+        state = self.sample_states.get(sample_id)
+        if state is None:
+            state = _PatchFeatureSampleState(
+                aggregation=self.aggregation,
+                patch_size=patch_size,
+                num_features=int(scores.shape[1]),
+            )
+            self.sample_states[sample_id] = state
+        elif state.patch_size != patch_size:
             raise ValueError(
-                f"Invalid context bounds for patch aggregation: start={context_start}, end={context_end}."
+                "Patch size changed across updates for one sample. "
+                f"Got {patch_size} vs {state.patch_size}."
             )
 
-        num_patches, num_features = scores.shape
-        for patch_index in range(num_patches):
-            patch_start = context_start + patch_index * patch_size
-            if patch_start >= context_end:
-                break
-            patch_end = min(context_end, patch_start + patch_size)
+        state.update(
+            context_start=context_start,
+            context_end=context_end,
+            patch_scores=scores,
+            patch_targets=targets,
+        )
 
-            for feature_index in range(num_features):
-                key = (sample_id, patch_start, patch_end, feature_index)
-                score = float(scores[patch_index, feature_index])
-                target = int(targets[patch_index, feature_index] > 0)
+    def finalize_arrays(
+        self,
+    ) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return dense arrays for fast metric computation."""
 
-                if self.aggregation == "mean":
-                    self.score_buffer[key] = self.score_buffer.get(key, 0.0) + score
-                    self.count_buffer[key] = self.count_buffer.get(key, 0) + 1
-                elif self.aggregation == "max":
-                    self.score_buffer[key] = max(self.score_buffer.get(key, float("-inf")), score)
-                    self.count_buffer[key] = 1
-                else:
-                    raise ValueError(
-                        f"Unsupported patch-feature aggregation `{self.aggregation}`. "
-                        "Supported: mean, max."
-                    )
+        sample_ids = sorted(self.sample_states)
+        if not sample_ids:
+            return (
+                [],
+                np.zeros((0,), dtype=np.int32),
+                np.zeros((0,), dtype=np.int32),
+                np.zeros((0,), dtype=np.float32),
+                np.zeros((0,), dtype=np.bool_),
+            )
 
-                self.target_buffer[key] = max(self.target_buffer.get(key, 0), target)
+        total_units = 0
+        for sample_id in sample_ids:
+            state = self.sample_states[sample_id]
+            total_units += len(state.score_buffer) * state.num_features
+
+        sample_indices = np.zeros((total_units,), dtype=np.int32)
+        feature_indices = np.zeros((total_units,), dtype=np.int32)
+        scores = np.zeros((total_units,), dtype=np.float32)
+        targets = np.zeros((total_units,), dtype=np.bool_)
+
+        offset = 0
+        for sample_index, sample_id in enumerate(sample_ids):
+            state = self.sample_states[sample_id]
+            feature_row = np.arange(state.num_features, dtype=np.int32)
+            for _, score_row, target_row in state.finalized_patch_rows():
+                next_offset = offset + state.num_features
+                sample_indices[offset:next_offset] = sample_index
+                feature_indices[offset:next_offset] = feature_row
+                scores[offset:next_offset] = score_row.astype(np.float32, copy=False)
+                targets[offset:next_offset] = target_row.astype(np.bool_, copy=False)
+                offset = next_offset
+
+        return sample_ids, sample_indices, feature_indices, scores, targets
 
     def finalize(self) -> tuple[PatchFeatureRecord, ...]:
         """Return finalized patch-feature records sorted by sample, region, and feature."""
 
         records: list[PatchFeatureRecord] = []
-        for key in sorted(self.score_buffer):
-            sample_id, patch_start, patch_end, feature_index = key
-            score = self.score_buffer[key]
-            if self.aggregation == "mean":
-                score /= max(self.count_buffer.get(key, 1), 1)
-            records.append(
-                PatchFeatureRecord(
-                    sample_id=sample_id,
-                    patch_start=patch_start,
-                    patch_end=patch_end,
-                    feature_index=feature_index,
-                    score=float(score),
-                    target=bool(self.target_buffer.get(key, 0)),
-                )
-            )
+        for sample_id in sorted(self.sample_states):
+            state = self.sample_states[sample_id]
+            for patch_start, score_row, target_row in state.finalized_patch_rows():
+                patch_end = min(state.observed_end, patch_start + state.patch_size)
+                for feature_index in range(state.num_features):
+                    records.append(
+                        PatchFeatureRecord(
+                            sample_id=sample_id,
+                            patch_start=int(patch_start),
+                            patch_end=int(patch_end),
+                            feature_index=feature_index,
+                            score=float(score_row[feature_index]),
+                            target=bool(target_row[feature_index]),
+                        )
+                    )
         return tuple(records)
 
 
@@ -224,5 +357,6 @@ __all__ = [
     "PatchFeatureRecord",
     "PointScoreAccumulator",
     "patch_scores_to_point_scores",
+    "reduce_point_feature_scores",
     "reduce_patch_scores",
 ]

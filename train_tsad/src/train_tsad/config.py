@@ -40,13 +40,20 @@ class DataConfig:
     batch_size: int = 64
     eval_batch_size: int = 64
     num_workers: int = 0
+    max_cached_shards: int = 32
     shuffle: bool = True
+    shuffle_strategy: str = "shard_block"
     pin_memory: bool = True
     include_tail: bool = True
     pad_short_sequences: bool = True
     drop_last: bool = False
     enable_patch_masking: bool = True
     mask_ratio: float = 0.2
+    load_normal_series: bool = False
+    load_metadata: bool = False
+    enable_direct_window_read: bool = True
+    normalization_mode: str = "none"
+    normalization_eps: float = 1e-5
 
     def __post_init__(self) -> None:
         self.dataset_root = _coerce_path(self.dataset_root)
@@ -64,8 +71,20 @@ class DataConfig:
             raise ValueError("`data.eval_batch_size` must be positive.")
         if self.num_workers < 0:
             raise ValueError("`data.num_workers` cannot be negative.")
+        if self.max_cached_shards <= 0:
+            raise ValueError("`data.max_cached_shards` must be positive.")
+        if self.shuffle_strategy not in {"global_window", "sample_block", "shard_block"}:
+            raise ValueError(
+                "`data.shuffle_strategy` must be one of: global_window, sample_block, shard_block."
+            )
         if not 0.0 <= self.mask_ratio <= 1.0:
             raise ValueError("`data.mask_ratio` must be in [0, 1].")
+        if self.normalization_mode not in {"none", "per_sample_per_feature_zscore"}:
+            raise ValueError(
+                "`data.normalization_mode` must be one of: none, per_sample_per_feature_zscore."
+            )
+        if self.normalization_eps <= 0:
+            raise ValueError("`data.normalization_eps` must be positive.")
 
     @property
     def num_patches(self) -> int:
@@ -95,6 +114,9 @@ class ModelConfig:
     attention_dropout: float = 0.1
     activation: str = "gelu"
     use_learned_positional_encoding: bool = True
+    use_shared_output_projection: bool = False
+    use_observation_space_anomaly_head: bool = False
+    anomaly_patch_aggregation: str = "or"
 
     def __post_init__(self) -> None:
         if self.patch_size <= 0:
@@ -115,6 +137,10 @@ class ModelConfig:
             raise ValueError("`model.dropout` must be in [0, 1).")
         if not 0.0 <= self.attention_dropout < 1.0:
             raise ValueError("`model.attention_dropout` must be in [0, 1).")
+        if self.anomaly_patch_aggregation not in {"or", "mean", "max"}:
+            raise ValueError(
+                "`model.anomaly_patch_aggregation` must be one of: or, mean, max."
+            )
 
 
 @dataclass(slots=True)
@@ -122,13 +148,17 @@ class LossConfig:
     """Loss weights and anomaly supervision settings."""
 
     anomaly_loss_weight: float = 1.0
+    point_anomaly_loss_weight: float = 0.0
     reconstruction_loss_weight: float = 0.01
     anomaly_pos_weight: float | str | None = "auto"
+    point_anomaly_pos_weight: float | str | None = "auto"
     label_smoothing: float = 0.0
 
     def __post_init__(self) -> None:
         if self.anomaly_loss_weight <= 0:
             raise ValueError("`loss.anomaly_loss_weight` must be positive.")
+        if self.point_anomaly_loss_weight < 0:
+            raise ValueError("`loss.point_anomaly_loss_weight` cannot be negative.")
         if self.reconstruction_loss_weight < 0:
             raise ValueError("`loss.reconstruction_loss_weight` cannot be negative.")
         if isinstance(self.anomaly_pos_weight, str):
@@ -136,6 +166,13 @@ class LossConfig:
                 raise ValueError("`loss.anomaly_pos_weight` must be a positive float, null, or `auto`.")
         elif self.anomaly_pos_weight is not None and self.anomaly_pos_weight <= 0:
             raise ValueError("`loss.anomaly_pos_weight` must be positive when provided.")
+        if isinstance(self.point_anomaly_pos_weight, str):
+            if self.point_anomaly_pos_weight != "auto":
+                raise ValueError(
+                    "`loss.point_anomaly_pos_weight` must be a positive float, null, or `auto`."
+                )
+        elif self.point_anomaly_pos_weight is not None and self.point_anomaly_pos_weight <= 0:
+            raise ValueError("`loss.point_anomaly_pos_weight` must be positive when provided.")
         if not 0.0 <= self.label_smoothing < 1.0:
             raise ValueError("`loss.label_smoothing` must be in [0, 1).")
 
@@ -185,6 +222,7 @@ class TrainConfig:
     validate_every_n_epochs: int = 1
     save_best_only: bool = False
     mixed_precision: bool = False
+    progress_write_interval_seconds: float = 2.0
 
     def __post_init__(self) -> None:
         self.output_dir = _coerce_path(self.output_dir)
@@ -200,6 +238,8 @@ class TrainConfig:
             raise ValueError("`train.log_every_n_steps` must be positive.")
         if self.validate_every_n_epochs <= 0:
             raise ValueError("`train.validate_every_n_epochs` must be positive.")
+        if self.progress_write_interval_seconds <= 0:
+            raise ValueError("`train.progress_write_interval_seconds` must be positive.")
 
 
 @dataclass(slots=True)
@@ -255,6 +295,11 @@ class ExperimentConfig:
         if self.data.patch_size != self.model.patch_size:
             raise ValueError(
                 "`data.patch_size` must match `model.patch_size` to keep patch labels aligned."
+            )
+        if self.loss.point_anomaly_loss_weight > 0.0 and not self.model.use_observation_space_anomaly_head:
+            raise ValueError(
+                "`loss.point_anomaly_loss_weight > 0` requires "
+                "`model.use_observation_space_anomaly_head = true`."
             )
 
     def to_dict(self) -> dict[str, Any]:

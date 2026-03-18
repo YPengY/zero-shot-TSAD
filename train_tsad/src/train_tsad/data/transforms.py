@@ -49,7 +49,12 @@ class RandomPatchMaskingTransform:
         if seed is not None:
             self.generator.manual_seed(seed)
 
-    def __call__(self, inputs: Tensor) -> MaskingTargets:
+    def __call__(
+        self,
+        inputs: Tensor,
+        *,
+        valid_token_mask: Tensor | None = None,
+    ) -> MaskingTargets:
         """Generate reconstruction targets and point-level mask indices.
 
         Args:
@@ -75,6 +80,15 @@ class RandomPatchMaskingTransform:
         reconstruction_targets = inputs.clone()
         num_patches = context_size // self.patch_size
         num_patch_tokens = num_patches * num_features
+        valid_patch_mask = None
+        if valid_token_mask is not None:
+            expected_shape = (batch_size, num_patches, num_features)
+            if tuple(valid_token_mask.shape) != expected_shape:
+                raise ValueError(
+                    "`valid_token_mask` must have shape [B, N_patches, D]. "
+                    f"Got {tuple(valid_token_mask.shape)} vs {expected_shape}."
+                )
+            valid_patch_mask = valid_token_mask.to(dtype=torch.bool)
 
         if self.mask_ratio == 0.0 or num_patch_tokens == 0:
             patch_mask = torch.zeros(
@@ -82,19 +96,30 @@ class RandomPatchMaskingTransform:
                 dtype=torch.bool,
             )
         else:
-            desired_masked = int(math.ceil(num_patch_tokens * self.mask_ratio))
-            num_masked_tokens = min(
-                num_patch_tokens,
-                max(self.min_masked_tokens, desired_masked),
-            )
-
             patch_mask = torch.zeros(
                 (batch_size, num_patch_tokens),
                 dtype=torch.bool,
             )
             for batch_index in range(batch_size):
-                permutation = torch.randperm(num_patch_tokens, generator=self.generator)
-                patch_mask[batch_index, permutation[:num_masked_tokens]] = True
+                if valid_patch_mask is None:
+                    candidate_indices = torch.arange(num_patch_tokens)
+                else:
+                    candidate_indices = torch.nonzero(
+                        valid_patch_mask[batch_index].reshape(num_patch_tokens),
+                        as_tuple=False,
+                    ).flatten()
+
+                if candidate_indices.numel() == 0:
+                    continue
+
+                desired_masked = int(math.ceil(candidate_indices.numel() * self.mask_ratio))
+                num_masked_tokens = min(
+                    candidate_indices.numel(),
+                    max(self.min_masked_tokens, desired_masked),
+                )
+                permutation = torch.randperm(candidate_indices.numel(), generator=self.generator)
+                selected = candidate_indices[permutation[:num_masked_tokens]]
+                patch_mask[batch_index, selected] = True
             patch_mask = patch_mask.reshape(batch_size, num_patches, num_features)
 
         # Expand patch mask back to point level along the time axis.

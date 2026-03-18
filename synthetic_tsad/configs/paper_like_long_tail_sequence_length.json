@@ -1,0 +1,8 @@
+{
+  "sequence_length": {
+    "min": 256,
+    "max": 10000,
+    "distribution": "truncated_exponential",
+    "decay_scale": 2400
+  }
+}

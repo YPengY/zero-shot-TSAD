@@ -794,6 +794,15 @@ class SeasonalAnomalyInjector:
     def _resolved_node_event_cap(self, n: int) -> int:
         return self._placement_policy().resolve_max_events_per_node(sequence_length=n)
 
+    def _resolve_event_count(self, *, n: int, rng: np.random.Generator) -> int:
+        seasonal_cfg = self._seasonal_config()
+        base_count = int(seasonal_cfg.events_per_sample.sample(rng))
+        if base_count <= 0 or not bool(seasonal_cfg.scale_events_by_sequence_length):
+            return max(0, base_count)
+        reference = max(1, int(seasonal_cfg.sequence_length_reference))
+        scaled = int((float(base_count) * float(n) / float(reference)) + 0.5)
+        return max(1, scaled)
+
     def sample_events(
         self,
         n: int,
@@ -811,7 +820,7 @@ class SeasonalAnomalyInjector:
 
         placements: dict[int, list[tuple[int, int]]] = {node: [] for node in nodes}
         counts: dict[int, int] = {node: 0 for node in nodes}
-        count = seasonal_cfg.events_per_sample.sample(rng)
+        count = self._resolve_event_count(n=n, rng=rng)
         max_events_per_node = self._resolved_node_event_cap(n)
         if max_events_per_node <= 0:
             return []

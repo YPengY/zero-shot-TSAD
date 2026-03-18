@@ -160,6 +160,84 @@ def main() -> None:
     parser.add_argument(
         '--print-config', action='store_true', help='Print final merged config and exit'
     )
+    parser.add_argument(
+        '--compress-output',
+        action='store_true',
+        help='Compress per-sample raw NPZ outputs before shard packing.',
+    )
+    parser.add_argument(
+        '--direct-pack',
+        action='store_true',
+        help='Write shard-packed outputs directly and skip raw sample files.',
+    )
+    parser.add_argument(
+        '--split',
+        choices=['train', 'val', 'test'],
+        default=None,
+        help='Split name used by direct-pack mode. Defaults to train when omitted.',
+    )
+    parser.add_argument(
+        '--samples-per-shard',
+        type=int,
+        default=512,
+        help='Maximum number of samples per shard in direct-pack mode.',
+    )
+    parser.add_argument(
+        '--direct-window-pack',
+        action='store_true',
+        help='Write window-level shard outputs directly (skip sample-packed shards).',
+    )
+    parser.add_argument(
+        '--window-context-size',
+        type=int,
+        default=1024,
+        help='Context size used by --direct-window-pack.',
+    )
+    parser.add_argument(
+        '--window-patch-size',
+        type=int,
+        default=16,
+        help='Patch size used by --direct-window-pack.',
+    )
+    parser.add_argument(
+        '--window-stride',
+        type=int,
+        default=None,
+        help='Window stride used by --direct-window-pack (defaults to context size).',
+    )
+    parser.add_argument(
+        '--window-windows-per-shard',
+        type=int,
+        default=4096,
+        help='Maximum windows per shard in --direct-window-pack mode.',
+    )
+    parser.add_argument(
+        '--window-no-include-tail',
+        action='store_true',
+        help='Disable tail window retention in --direct-window-pack mode.',
+    )
+    parser.add_argument(
+        '--window-no-pad-short-sequences',
+        action='store_true',
+        help='Drop short sequences in --direct-window-pack mode.',
+    )
+    parser.add_argument(
+        '--window-no-debug-sidecar',
+        action='store_true',
+        help='Disable debug.<split>.jsonl sidecar in --direct-window-pack mode.',
+    )
+    parser.add_argument(
+        '--window-min-patch-positive-ratio',
+        type=float,
+        default=None,
+        help='Drop windows whose patch_positive_ratio is below this value in --direct-window-pack mode.',
+    )
+    parser.add_argument(
+        '--window-min-anomaly-point-ratio',
+        type=float,
+        default=None,
+        help='Drop windows whose anomaly_point_ratio is below this value in --direct-window-pack mode.',
+    )
     args = parser.parse_args()
 
     cfg = _cfg_from_overrides(
@@ -181,7 +259,23 @@ def main() -> None:
         return
 
     pipeline = SyntheticGeneratorPipeline(cfg)
-    pipeline.run(args.output)
+    pipeline.run(
+        args.output,
+        compress_output=args.compress_output,
+        direct_pack=args.direct_pack,
+        direct_window_pack=args.direct_window_pack,
+        split=args.split,
+        samples_per_shard=args.samples_per_shard,
+        window_context_size=args.window_context_size,
+        window_patch_size=args.window_patch_size,
+        window_stride=args.window_stride,
+        window_include_tail=not args.window_no_include_tail,
+        window_pad_short_sequences=not args.window_no_pad_short_sequences,
+        window_windows_per_shard=args.window_windows_per_shard,
+        window_debug_sidecar=not args.window_no_debug_sidecar,
+        window_min_patch_positive_ratio=args.window_min_patch_positive_ratio,
+        window_min_anomaly_point_ratio=args.window_min_anomaly_point_ratio,
+    )
 
 
 if __name__ == '__main__':

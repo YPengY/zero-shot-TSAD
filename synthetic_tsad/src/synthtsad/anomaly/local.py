@@ -744,6 +744,15 @@ class LocalAnomalyInjector:
     def _resolved_node_event_cap(self, n: int) -> int:
         return self._placement_policy().resolve_max_events_per_node(sequence_length=n)
 
+    def _resolve_event_count(self, *, n: int, rng: np.random.Generator) -> int:
+        local_cfg = self._local_config()
+        base_count = int(local_cfg.events_per_sample.sample(rng))
+        if base_count <= 0 or not bool(local_cfg.scale_events_by_sequence_length):
+            return max(0, base_count)
+        reference = max(1, int(local_cfg.sequence_length_reference))
+        scaled = int((float(base_count) * float(n) / float(reference)) + 0.5)
+        return max(1, scaled)
+
     def _render_triangular_spike(
         self,
         idx: np.ndarray,
@@ -844,7 +853,7 @@ class LocalAnomalyInjector:
 
         placements: dict[int, list[tuple[int, int]]] = {node: [] for node in nodes}
         counts: dict[int, int] = {node: 0 for node in nodes}
-        event_count = local_cfg.events_per_sample.sample(rng)
+        event_count = self._resolve_event_count(n=n, rng=rng)
         max_events_per_node = self._resolved_node_event_cap(n)
         if max_events_per_node <= 0:
             return []

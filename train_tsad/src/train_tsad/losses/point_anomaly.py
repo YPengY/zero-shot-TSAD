@@ -9,8 +9,8 @@ from torch.nn import functional as F
 from ..interfaces import Batch, LossOutput, ModelOutput
 
 
-class PatchAnomalyLoss(nn.Module):
-    """Binary patch-level anomaly loss for TimeRCD training."""
+class PointAnomalyLoss(nn.Module):
+    """Binary point-feature anomaly loss for observation-space anomaly supervision."""
 
     def __init__(
         self,
@@ -18,12 +18,7 @@ class PatchAnomalyLoss(nn.Module):
         pos_weight: float | None = None,
         label_smoothing: float = 0.0,
     ) -> None:
-        """Configure BCE-with-logits anomaly objective.
-
-        Args:
-            pos_weight: Optional positive-class weight for class imbalance.
-            label_smoothing: Smooth binary targets toward 0.5.
-        """
+        """Configure BCE-with-logits point anomaly objective."""
 
         super().__init__()
 
@@ -50,33 +45,31 @@ class PatchAnomalyLoss(nn.Module):
         return targets * (1.0 - self.label_smoothing) + 0.5 * self.label_smoothing
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
-        """Compute anomaly loss and monitoring metrics on patch grid.
+        """Compute point-level anomaly loss and diagnostics on valid points only."""
 
-        Inputs:
-            `output.logits` and `batch.patch_labels` with shape `[B, N_patches, D]`.
-        """
+        if batch.point_masks is None:
+            raise ValueError("`batch.point_masks` is required for point anomaly loss.")
+        if output.point_logits is None:
+            raise ValueError("`output.point_logits` is required for point anomaly loss.")
 
-        if batch.patch_labels is None:
-            raise ValueError("`batch.patch_labels` is required for anomaly loss.")
-
-        logits = output.logits
-        targets = batch.patch_labels
+        logits = output.point_logits
+        targets = batch.point_masks
         if logits.shape != targets.shape:
             raise ValueError(
-                "`output.logits` must match `batch.patch_labels` shape. "
+                "`output.point_logits` must match `batch.point_masks` shape. "
                 f"Got {tuple(logits.shape)} vs {tuple(targets.shape)}."
             )
 
-        valid_mask = batch.patch_valid_mask
+        valid_mask = batch.point_valid_mask
         if valid_mask is not None:
             if valid_mask.shape != logits.shape:
                 raise ValueError(
-                    "`batch.patch_valid_mask` must match anomaly logits shape. "
+                    "`batch.point_valid_mask` must match point anomaly logits shape. "
                     f"Got {tuple(valid_mask.shape)} vs {tuple(logits.shape)}."
                 )
             valid_mask = valid_mask.to(device=logits.device, dtype=torch.bool)
             if not torch.any(valid_mask):
-                raise ValueError("`batch.patch_valid_mask` does not contain any valid anomaly units.")
+                raise ValueError("`batch.point_valid_mask` does not contain any valid point-feature units.")
             logits = logits[valid_mask]
             targets = targets[valid_mask]
 
@@ -90,7 +83,6 @@ class PatchAnomalyLoss(nn.Module):
         )
 
         with torch.no_grad():
-            # Quick training diagnostics at threshold=0.5.
             probabilities = torch.sigmoid(logits)
             predictions = probabilities >= 0.5
             binary_targets = targets >= 0.5
@@ -101,12 +93,12 @@ class PatchAnomalyLoss(nn.Module):
         return LossOutput(
             loss=loss,
             metrics={
-                "anomaly_loss": float(loss.detach().item()),
-                "patch_accuracy": accuracy,
-                "target_positive_rate": positive_rate,
-                "predicted_positive_rate": predicted_positive_rate,
+                "point_anomaly_loss": float(loss.detach().item()),
+                "point_accuracy": accuracy,
+                "point_target_positive_rate": positive_rate,
+                "point_predicted_positive_rate": predicted_positive_rate,
             },
         )
 
 
-__all__ = ["PatchAnomalyLoss"]
+__all__ = ["PointAnomalyLoss"]

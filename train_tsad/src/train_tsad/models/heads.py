@@ -63,4 +63,132 @@ class ReconstructionHead(nn.Module):
         return sequence.transpose(1, 2).contiguous()
 
 
-__all__ = ["AnomalyHead", "ReconstructionHead"]
+class SharedOutputProjection(nn.Module):
+    """Shared output projection `W_s` applied before task-specific heads."""
+
+    def __init__(self, *, d_model: int) -> None:
+        """Initialize the shared projection in token embedding space."""
+
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("`d_model` must be positive.")
+        self.norm = nn.LayerNorm(d_model)
+        self.projection = nn.Linear(d_model, d_model)
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        """Project encoder outputs while preserving `[B, L, H]` shape."""
+
+        if tokens.ndim != 3:
+            raise ValueError(f"`tokens` must have shape [B, L, H], got ndim={tokens.ndim}.")
+        return self.projection(self.norm(tokens))
+
+
+class ProjectedAnomalyHead(nn.Module):
+    """Task-specific anomaly projection used after the shared output layer."""
+
+    def __init__(self, *, d_model: int) -> None:
+        """Initialize per-token anomaly projection without extra normalization."""
+
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("`d_model` must be positive.")
+        self.projection = nn.Linear(d_model, 1)
+
+    def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
+        """Map shared token embeddings to patch-level logits `[B, N_patches, D]`."""
+
+        token_grid = _reshape_token_grid(tokens, num_patches=num_patches, num_features=num_features)
+        return self.projection(token_grid).squeeze(-1)
+
+
+class ProjectedReconstructionHead(nn.Module):
+    """Task-specific reconstruction projection used after the shared output layer."""
+
+    def __init__(self, *, d_model: int, patch_size: int) -> None:
+        """Initialize point reconstruction projection without extra normalization."""
+
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("`d_model` must be positive.")
+        if patch_size <= 0:
+            raise ValueError("`patch_size` must be positive.")
+        self.patch_size = patch_size
+        self.projection = nn.Linear(d_model, patch_size)
+
+    def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
+        """Decode shared token embeddings back to point sequence `[B, W, D]`."""
+
+        token_grid = _reshape_token_grid(tokens, num_patches=num_patches, num_features=num_features)
+        patch_values = self.projection(token_grid)
+        sequence = patch_values.permute(0, 2, 1, 3).reshape(
+            tokens.shape[0],
+            num_features,
+            num_patches * self.patch_size,
+        )
+        return sequence.transpose(1, 2).contiguous()
+
+
+class ObservationSpaceAnomalyHead(nn.Module):
+    """Project token embeddings back to point-level anomaly logits `[B, W, D]`."""
+
+    def __init__(self, *, d_model: int, patch_size: int) -> None:
+        """Initialize point-level anomaly projection with token normalization."""
+
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("`d_model` must be positive.")
+        if patch_size <= 0:
+            raise ValueError("`patch_size` must be positive.")
+        self.patch_size = patch_size
+        self.norm = nn.LayerNorm(d_model)
+        self.projection = nn.Linear(d_model, patch_size)
+
+    def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
+        """Decode token grid to point-level anomaly logits `[B, W, D]`."""
+
+        token_grid = _reshape_token_grid(self.norm(tokens), num_patches=num_patches, num_features=num_features)
+        patch_logits = self.projection(token_grid)
+        sequence = patch_logits.permute(0, 2, 1, 3).reshape(
+            tokens.shape[0],
+            num_features,
+            num_patches * self.patch_size,
+        )
+        return sequence.transpose(1, 2).contiguous()
+
+
+class ProjectedObservationSpaceAnomalyHead(nn.Module):
+    """Task-specific point-level anomaly projection used after the shared output layer."""
+
+    def __init__(self, *, d_model: int, patch_size: int) -> None:
+        """Initialize point-level anomaly projection without extra normalization."""
+
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("`d_model` must be positive.")
+        if patch_size <= 0:
+            raise ValueError("`patch_size` must be positive.")
+        self.patch_size = patch_size
+        self.projection = nn.Linear(d_model, patch_size)
+
+    def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
+        """Decode shared token embeddings to point-level anomaly logits `[B, W, D]`."""
+
+        token_grid = _reshape_token_grid(tokens, num_patches=num_patches, num_features=num_features)
+        patch_logits = self.projection(token_grid)
+        sequence = patch_logits.permute(0, 2, 1, 3).reshape(
+            tokens.shape[0],
+            num_features,
+            num_patches * self.patch_size,
+        )
+        return sequence.transpose(1, 2).contiguous()
+
+
+__all__ = [
+    "AnomalyHead",
+    "ObservationSpaceAnomalyHead",
+    "ProjectedAnomalyHead",
+    "ProjectedObservationSpaceAnomalyHead",
+    "ProjectedReconstructionHead",
+    "ReconstructionHead",
+    "SharedOutputProjection",
+]

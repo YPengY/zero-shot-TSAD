@@ -61,6 +61,8 @@ class Trainer:
         gradient_clip_norm: float | None = None,
         gradient_accumulation_steps: int = 1,
         log_every_n_steps: int = 50,
+        mixed_precision: bool = False,
+        progress_write_interval_seconds: float = 2.0,
     ) -> None:
         """Configure the trainer runtime state.
 
@@ -74,12 +76,16 @@ class Trainer:
             gradient_clip_norm: Optional global grad-norm clipping threshold.
             gradient_accumulation_steps: Number of mini-batches per optimizer step.
             log_every_n_steps: Training-step log interval.
+            mixed_precision: Enable AMP autocast + scaler on CUDA.
+            progress_write_interval_seconds: Minimum wall time between progress writes.
         """
 
         if gradient_accumulation_steps <= 0:
             raise ValueError("`gradient_accumulation_steps` must be positive.")
         if log_every_n_steps <= 0:
             raise ValueError("`log_every_n_steps` must be positive.")
+        if progress_write_interval_seconds <= 0:
+            raise ValueError("`progress_write_interval_seconds` must be positive.")
 
         self.model = model
         self.loss_fn = loss_fn
@@ -90,9 +96,15 @@ class Trainer:
         self.gradient_clip_norm = gradient_clip_norm
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.log_every_n_steps = log_every_n_steps
+        self.mixed_precision = bool(mixed_precision)
+        self.progress_write_interval_seconds = float(progress_write_interval_seconds)
+        self._last_progress_write_time = 0.0
 
         if isinstance(self.model, nn.Module):
             self.model.to(self.device)
+
+        self._amp_enabled = bool(self.mixed_precision and self.device.type == "cuda")
+        self._grad_scaler = torch.amp.GradScaler("cuda") if self._amp_enabled else None
 
     def fit(
         self,
@@ -164,6 +176,7 @@ class Trainer:
             latest_epoch_record: dict[str, Any] | None = None,
             stopped_early: bool = False,
             error: str | None = None,
+            force_write: bool = False,
         ) -> None:
             progress_ratio = min(1.0, max(0.0, progress_units / planned_total_units))
             elapsed_seconds = max(0.0, time.perf_counter() - fit_started_at)
@@ -196,6 +209,7 @@ class Trainer:
                 val_batches_per_epoch=val_batches,
                 stopped_early=stopped_early,
                 error=error,
+                force=force_write,
             )
 
         emit_progress(
@@ -203,6 +217,7 @@ class Trainer:
             status="running",
             epoch_current=0,
             progress_units=0,
+            force_write=True,
         )
 
         for epoch in range(1, max_epochs + 1):
@@ -326,6 +341,7 @@ class Trainer:
                 epoch_current=epoch,
                 progress_units=completed_units_before_epoch(epoch) + train_batches + (val_batches if val_metrics is not None else 0),
                 latest_epoch_record=epoch_record,
+                force_write=True,
             )
 
             if early_stopping_patience > 0 and bad_epoch_count >= early_stopping_patience:
@@ -336,6 +352,7 @@ class Trainer:
                     progress_units=planned_total_units,
                     latest_epoch_record=epoch_record,
                     stopped_early=True,
+                    force_write=True,
                 )
                 print(
                     f"Early stopping triggered at epoch {epoch}. "
@@ -350,6 +367,7 @@ class Trainer:
             progress_units=planned_total_units,
             latest_epoch_record=history[-1] if history else None,
             stopped_early=early_stopping_patience > 0 and len(history) < max_epochs,
+            force_write=True,
         )
 
         return FitResult(
@@ -401,24 +419,37 @@ class Trainer:
             sample_count += batch_size
 
             with torch.set_grad_enabled(training):
-                output = module(batch)
-                loss_output = self.loss_fn(batch, output)
-                raw_loss = loss_output.loss
+                with torch.amp.autocast(
+                    device_type=self.device.type,
+                    enabled=self._amp_enabled,
+                ):
+                    output = module(batch)
+                    loss_output = self.loss_fn(batch, output)
+                    raw_loss = loss_output.loss
                 if evaluator is not None:
                     evaluator.update(batch, output)
 
                 if training:
                     scaled_loss = raw_loss / self.gradient_accumulation_steps
-                    scaled_loss.backward()
+                    if self._grad_scaler is not None:
+                        self._grad_scaler.scale(scaled_loss).backward()
+                    else:
+                        scaled_loss.backward()
 
                     # Update params only at accumulation boundaries (or final step).
                     is_update_step = (
                         step % self.gradient_accumulation_steps == 0 or step == num_batches
                     )
                     if is_update_step:
+                        if self._grad_scaler is not None:
+                            self._grad_scaler.unscale_(self.optimizer)
                         if self.gradient_clip_norm is not None:
                             clip_grad_norm_(module.parameters(), self.gradient_clip_norm)
-                        self.optimizer.step()
+                        if self._grad_scaler is not None:
+                            self._grad_scaler.step(self.optimizer)
+                            self._grad_scaler.update()
+                        else:
+                            self.optimizer.step()
                         self.optimizer.zero_grad(set_to_none=True)
 
             batch_metrics = dict(loss_output.metrics)
@@ -522,9 +553,14 @@ class Trainer:
         val_batches_per_epoch: int,
         stopped_early: bool,
         error: str | None,
+        force: bool = False,
     ) -> None:
         if self.checkpoint_manager is None:
             return
+        now = time.perf_counter()
+        if not force and (now - self._last_progress_write_time) < self.progress_write_interval_seconds:
+            return
+        self._last_progress_write_time = now
 
         split_progress_ratio = None
         if split_step_current is not None and split_step_total and split_step_total > 0:

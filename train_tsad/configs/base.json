@@ -19,7 +19,8 @@
                  "pad_short_sequences":  false,
                  "drop_last":  false,
                  "enable_patch_masking":  true,
-                 "mask_ratio":  0.2
+                 "mask_ratio":  0.2,
+                 "enable_direct_window_read":  true
              },
     "model":  {
                   "name":  "timercd",
@@ -71,7 +72,7 @@
                  "primary_metric":  "pr_auc",
                  "primary_metric_mode":  "max",
                  "threshold":  0.5,
-                 "threshold_search":  false,
+                 "threshold_search":  true,
                  "threshold_search_metric":  "f1",
                  "patch_feature_score_aggregation":  "mean",
                  "report_per_feature":  false,

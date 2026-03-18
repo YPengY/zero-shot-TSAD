@@ -20,7 +20,7 @@ from .interfaces import (
     LabelPayload,
     Stage1NodeParams,
 )
-from .io.writer import DatasetWriter
+from .io.writer import DatasetWriter, PackedDatasetWriter, PackedWindowDatasetWriter
 from .labeling.labeler import LabelBuilder
 
 
@@ -134,145 +134,190 @@ class SyntheticGeneratorPipeline:
                 fallback_node=node,
             )
 
-    def run(self, output_dir: Path) -> None:
+    def run(
+        self,
+        output_dir: Path,
+        *,
+        compress_output: bool = False,
+        direct_pack: bool = False,
+        direct_window_pack: bool = False,
+        split: str | None = None,
+        samples_per_shard: int = 512,
+        window_context_size: int = 1024,
+        window_patch_size: int = 16,
+        window_stride: int | None = None,
+        window_include_tail: bool = True,
+        window_pad_short_sequences: bool = True,
+        window_windows_per_shard: int = 4096,
+        window_debug_sidecar: bool = True,
+        window_min_patch_positive_ratio: float | None = None,
+        window_min_anomaly_point_ratio: float | None = None,
+    ) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
-        writer = DatasetWriter(output_dir)
-
+        target_split = split or "train"
+        if direct_window_pack:
+            writer = PackedWindowDatasetWriter(
+                output_dir,
+                split=target_split,
+                context_size=window_context_size,
+                patch_size=window_patch_size,
+                stride=window_stride,
+                include_tail=window_include_tail,
+                pad_short_sequences=window_pad_short_sequences,
+                windows_per_shard=window_windows_per_shard,
+                write_debug_sidecar=window_debug_sidecar,
+                min_patch_positive_ratio=window_min_patch_positive_ratio,
+                min_anomaly_point_ratio=window_min_anomaly_point_ratio,
+            )
+        elif direct_pack:
+            writer = PackedDatasetWriter(
+                output_dir,
+                split=target_split,
+                samples_per_shard=samples_per_shard,
+            )
+        else:
+            writer = DatasetWriter(output_dir, compress_arrays=compress_output)
         rng = np.random.default_rng(self.config.seed)
+        graph_sampler = CausalGraphSampler(self.config) if self.config.debug.enable_causal else None
+        local_injector = LocalAnomalyInjector(self.config)
+        seasonal_injector = SeasonalAnomalyInjector(self.config)
+        label_builder = LabelBuilder(self.config)
+        try:
+            for sample_id in range(self.config.num_samples):
+                n, d = self._sample_dimensions(rng)
+                t = np.arange(n, dtype=float)
 
-        for sample_id in range(self.config.num_samples):
-            n, d = self._sample_dimensions(rng)
-            t = np.arange(n, dtype=float)
+                # Stage 1 (parameter sampling only)
+                stage1_params = self._sample_stage1_params(n=n, d=d, rng=rng)
 
-            # Stage 1 (parameter sampling only)
-            stage1_params = self._sample_stage1_params(n=n, d=d, rng=rng)
+                # Stage 2 (parameter sampling only)
+                if self.config.debug.enable_causal:
+                    assert graph_sampler is not None
+                    graph = graph_sampler.sample_graph(num_nodes=d, rng=rng)
+                    arx = ARXSystem(self.config, graph)
+                    active_arx_params: ARXParams | None = arx.sample_params(rng)
+                    arx_params: ARXModelParams = active_arx_params
+                else:
+                    graph = self._empty_graph(d)
+                    arx = ARXSystem(self.config, graph)
+                    active_arx_params = None
+                    arx_params = self._disabled_arx_params()
 
-            # Stage 2 (parameter sampling only)
-            if self.config.debug.enable_causal:
-                graph = CausalGraphSampler(self.config).sample_graph(num_nodes=d, rng=rng)
-                arx = ARXSystem(self.config, graph)
-                active_arx_params: ARXParams | None = arx.sample_params(rng)
-                arx_params: ARXModelParams = active_arx_params
-            else:
-                graph = self._empty_graph(d)
-                arx = ARXSystem(self.config, graph)
-                active_arx_params = None
-                arx_params = self._disabled_arx_params()
+                # Stage 3 (parameter/event sampling only)
+                sampled_local_events: list[AnomalyEvent] = []
+                sampled_seasonal_events: list[AnomalyEvent] = []
 
-            # Stage 3 (parameter/event sampling only)
-            local_injector = LocalAnomalyInjector(self.config)
-            seasonal_injector = SeasonalAnomalyInjector(self.config)
-            sampled_local_events: list[AnomalyEvent] = []
-            sampled_seasonal_events: list[AnomalyEvent] = []
+                if rng.random() < self.config.anomaly_sample_ratio:
+                    if self.config.debug.enable_local_anomaly:
+                        sampled_local_events = local_injector.sample_events(
+                            n=n, d=d, rng=rng, graph=graph
+                        )
+                    if self.config.debug.enable_seasonal_anomaly:
+                        sampled_seasonal_events = seasonal_injector.sample_events(
+                            n=n,
+                            d=d,
+                            rng=rng,
+                            stage1_params=stage1_params,
+                        )
 
-            if rng.random() < self.config.anomaly_sample_ratio:
-                if self.config.debug.enable_local_anomaly:
-                    sampled_local_events = local_injector.sample_events(
-                        n=n, d=d, rng=rng, graph=graph
-                    )
-                if self.config.debug.enable_seasonal_anomaly:
-                    sampled_seasonal_events = seasonal_injector.sample_events(
+                if not self.config.debug.enable_causal:
+                    for event in sampled_local_events:
+                        event.is_endogenous = False
+                        event.root_cause_node = None
+                    for event in sampled_seasonal_events:
+                        event.is_endogenous = False
+                        event.root_cause_node = None
+
+                # Realization from sampled parameters.
+                x_base = self._realize_stage1(t=t, stage1_params=stage1_params)
+
+                # Endogenous local events are injected before causal realization so they
+                # propagate naturally through the structural dynamics.
+                pre_causal_local_events = [e for e in sampled_local_events if bool(e.is_endogenous)]
+                post_causal_local_events = [
+                    e for e in sampled_local_events if not bool(e.is_endogenous)
+                ]
+
+                if self.config.debug.enable_causal and pre_causal_local_events:
+                    assert active_arx_params is not None
+                    self._annotate_endogenous_local_events(
                         n=n,
                         d=d,
-                        rng=rng,
-                        stage1_params=stage1_params,
+                        local_injector=local_injector,
+                        events=pre_causal_local_events,
+                        arx=arx,
+                        arx_params=active_arx_params,
                     )
 
-            if not self.config.debug.enable_causal:
-                for event in sampled_local_events:
-                    event.is_endogenous = False
-                    event.root_cause_node = None
-                for event in sampled_seasonal_events:
-                    event.is_endogenous = False
-                    event.root_cause_node = None
+                x_base_anom = x_base.copy()
+                realized_events: list[AnomalyEvent] = []
+                if pre_causal_local_events:
+                    x_base_anom, local_events = local_injector.apply_events(
+                        x_normal=x_base_anom,
+                        events=pre_causal_local_events,
+                    )
+                    realized_events.extend(local_events)
 
-            # Realization from sampled parameters.
-            x_base = self._realize_stage1(t=t, stage1_params=stage1_params)
+                if self.config.debug.enable_causal:
+                    assert active_arx_params is not None
+                    x_normal, causal_state = arx.simulate_with_params(
+                        x_base=x_base, n_steps=n, params=active_arx_params
+                    )
+                    x_observed, _ = arx.simulate_with_params(
+                        x_base=x_base_anom, n_steps=n, params=active_arx_params
+                    )
+                else:
+                    x_normal = x_base.copy()
+                    x_observed = x_base_anom.copy()
+                    causal_state = self._disabled_causal_state(n=n, d=d)
 
-            # Endogenous local events are injected before causal realization so they
-            # propagate naturally through the structural dynamics.
-            pre_causal_local_events = [e for e in sampled_local_events if bool(e.is_endogenous)]
-            post_causal_local_events = [
-                e for e in sampled_local_events if not bool(e.is_endogenous)
-            ]
+                if post_causal_local_events:
+                    x_observed, local_events = local_injector.apply_events(
+                        x_normal=x_observed,
+                        events=post_causal_local_events,
+                    )
+                    realized_events.extend(local_events)
 
-            if self.config.debug.enable_causal and pre_causal_local_events:
-                assert active_arx_params is not None
-                self._annotate_endogenous_local_events(
-                    n=n,
-                    d=d,
-                    local_injector=local_injector,
-                    events=pre_causal_local_events,
-                    arx=arx,
-                    arx_params=active_arx_params,
+                if sampled_seasonal_events:
+                    x_observed, seasonal_events = seasonal_injector.apply_events(
+                        x_input=x_observed,
+                        events=sampled_seasonal_events,
+                        rng=rng,
+                        t=t,
+                        stage1_params=stage1_params,
+                        arx=arx if self.config.debug.enable_causal else None,
+                        arx_params=active_arx_params,
+                    )
+                    realized_events.extend(seasonal_events)
+
+                # Stage 4 labels
+                labels: LabelPayload = label_builder.build(
+                    x_normal=x_normal,
+                    x_anom=x_observed,
+                    events=realized_events,
+                    graph=graph,
+                    causal_state=causal_state,
                 )
 
-            x_base_anom = x_base.copy()
-            realized_events: list[AnomalyEvent] = []
-            if pre_causal_local_events:
-                x_base_anom, local_events = local_injector.apply_events(
-                    x_normal=x_base_anom,
-                    events=pre_causal_local_events,
+                metadata: GenerationMetadata = {
+                    "sample": {"seed_state": str(rng.bit_generator.state["state"]["state"])},
+                    "stage1": {"params": stage1_params},
+                    "stage2": {"params": arx_params},
+                    "stage3": {
+                        "sampled_events": {
+                            "local": [e.to_record() for e in sampled_local_events],
+                            "seasonal": [e.to_record() for e in sampled_seasonal_events],
+                        }
+                    },
+                }
+                writer.write_sample(
+                    sample_id=sample_id,
+                    normal_series=x_normal,
+                    observed_series=x_observed,
+                    labels=labels,
+                    graph=graph,
+                    metadata=metadata,
                 )
-                realized_events.extend(local_events)
-
-            if self.config.debug.enable_causal:
-                assert active_arx_params is not None
-                x_normal, causal_state = arx.simulate_with_params(
-                    x_base=x_base, n_steps=n, params=active_arx_params
-                )
-                x_observed, _ = arx.simulate_with_params(
-                    x_base=x_base_anom, n_steps=n, params=active_arx_params
-                )
-            else:
-                x_normal = x_base.copy()
-                x_observed = x_base_anom.copy()
-                causal_state = self._disabled_causal_state(n=n, d=d)
-
-            if post_causal_local_events:
-                x_observed, local_events = local_injector.apply_events(
-                    x_normal=x_observed,
-                    events=post_causal_local_events,
-                )
-                realized_events.extend(local_events)
-
-            if sampled_seasonal_events:
-                x_observed, seasonal_events = seasonal_injector.apply_events(
-                    x_input=x_observed,
-                    events=sampled_seasonal_events,
-                    rng=rng,
-                    t=t,
-                    stage1_params=stage1_params,
-                    arx=arx if self.config.debug.enable_causal else None,
-                    arx_params=active_arx_params,
-                )
-                realized_events.extend(seasonal_events)
-
-            # Stage 4 labels
-            labels: LabelPayload = LabelBuilder(self.config).build(
-                x_normal=x_normal,
-                x_anom=x_observed,
-                events=realized_events,
-                graph=graph,
-                causal_state=causal_state,
-            )
-
-            metadata: GenerationMetadata = {
-                "sample": {"seed_state": str(rng.bit_generator.state["state"]["state"])},
-                "stage1": {"params": stage1_params},
-                "stage2": {"params": arx_params},
-                "stage3": {
-                    "sampled_events": {
-                        "local": [e.to_record() for e in sampled_local_events],
-                        "seasonal": [e.to_record() for e in sampled_seasonal_events],
-                    }
-                },
-            }
-            writer.write_sample(
-                sample_id=sample_id,
-                normal_series=x_normal,
-                observed_series=x_observed,
-                labels=labels,
-                graph=graph,
-                metadata=metadata,
-            )
+        finally:
+            if hasattr(writer, "close"):
+                writer.close()

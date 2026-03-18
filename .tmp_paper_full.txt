@@ -1,0 +1,1776 @@
+PDF: C:\Users\Administrator\Desktop\毕设\开题报告部分参考文献\TOWARDS FOUNDATION MODELS FOR ZERO-SHOT TIME SERIES ANOMALY DETECTIONLEVERAGING SYNTHETIC DATA AND RELATIVE CONTEXT DISCREPANCY.pdf
+Pages: 38
+
+===== PAGE 1 =====
+Under review as a conference paper at ICLR 2026
+TOWARDSFOUNDATIONMODELS FORZERO-SHOTTIME
+SERIESANOMALYDETECTION: LEVERAGINGSYNTHETIC
+DATA ANDRELATIVECONTEXTDISCREPANCY
+Tian Lan∗ Hao Duong Le∗ Jinbo Li∗
+{lant23, lijb22}@mails.tsinghua.edu.cn
+Lehaoduong.Vn@gmail.com
+Wenjun He Meng Wang
+{hewenjun8, wangmeng71}@huawei.com
+Chenghao Liu† Chen Zhang†
+twinsken@gmail.com
+chenzhang01@tsinghua.edu.cn
+ABSTRACT
+Time series anomaly detection (TSAD) is a critical task, but developing models that gen-
+eralize to unseen data in a zero-shot manner remains a major challenge. Prevailing foun-
+dation models for TSAD predominantly rely on reconstruction-based objectives, which
+suffer from a fundamental objective mismatch: they struggle to identify subtle anomalies
+while often misinterpreting complex normal patterns, leading to high rates of false nega-
+tives and positives. To overcome these limitations, we introduceTimeRCD, a novel foun-
+dation model for TSAD built upon a new pre-training paradigm: Relative Context Dis-
+crepancy (RCD). Instead of learning to reconstruct inputs,TimeRCDis explicitly trained
+to identify anomalies by detecting significant discrepancies between adjacent time win-
+dows. This relational approach, implemented with a standard Transformer architecture,
+enables the model to capture contextual shifts indicative of anomalies that reconstruction-
+based methods often miss. To facilitate this paradigm, we develop a large-scale, diverse
+synthetic corpus with token-level anomaly labels, providing the rich supervisory signal
+necessary for effective pre-training. Extensive experiments demonstrate thatTimeRCD
+significantly outperforms existing general-purpose and anomaly-specific foundation mod-
+els in zero-shot TSAD across diverse datasets. Our results validate the superiority of the
+RCD paradigm and establish a new, effective path toward building robust and generaliz-
+able foundation models for time series anomaly detection 1.
+1 INTRODUCTION
+Time series anomaly detection (TSAD) is a crucial task in domains such as finance (Ahmed et al., 2016),
+healthcare (Kaji et al., 2019), industrial monitoring (Lan et al., 2025), and cloud operations (Ren et al.,
+2019). The accurate detection of rare and unexpected events is vital for ensuring system reliability and
+safety. Despite recent progress driven by deep learning, most existing approaches are trained in a dataset- and
+model-specific manner, which restricts their scalability and hampers generalization across diverse domains
+in azero-shotway.
+∗Equal contribution.
+†Corresponding author.
+1Code is available athttps://github.com/thu-sail-lab/Time-RCD
+1
+arXiv:2509.21190v3  [cs.LG]  11 Nov 2025
+
+===== PAGE 2 =====
+Under review as a conference paper at ICLR 2026
+(a) Smoothed out subtle anomalies
+Time-series with smooth anomalies
+Good Reconstruction on anomalies
+Cannot Identify anomalies
+(b) Fail to reconstruct complex pattern 
+Time-series with complex pattern
+Poor Reconstruction on complex pattern
+False Alarm
+False Alarm
+Complex patte rn
+Poor 
+Reconstruction
+Sm ooth Anomalies
+Low recons tructi on error
+(c) Anomaly Detection by Relative Context Discrepancy
+Transformer
+RCD by attention
+Anomalous RCD
+Anomalous RCD
+Anomaly Score
+Synthetic Engine 
+Contextual ano malies for RCD strategy
+Anomaly Series labels
+Anomaly Score
+Large Scale Corpus
+Pretrain
+Time-seriesTime-series
+Contextual 
+anomalies
+Figure 1:Limitations of Reconstruction-based TSAD and Our Proposed TimeRCD.(a) The model ac-
+curately reconstructs a smooth anomaly, resulting in a low error score and a missed detection (false negative).
+(b) The model fails to reconstruct a complex normal pattern unseen in the training dataset, leading to a high
+error score and a false alarm (false positive).(c)TimeRCD adopts RCD with a large-scale corpus and a
+standard Transformer-Encoder.
+The success of foundation models in natural language processing and computer vision has motivated efforts
+to establish similar paradigms for TSAD. Existing approaches can be broadly categorized into two directions:
+(i) general-purpose time series foundation models designed for multiple tasks such as classification, fore-
+casting, and anomaly detection (Gao et al., 2024; Goswami et al., 2024; Woo et al., 2024; Ekambaram et al.,
+2025; Xie et al., 2024), and (ii) anomaly-specific foundation models tailored explicitly for TSAD (Shentu
+et al., 2024). The more related work discussion is in Appx. B. Despite their differences, both types of mod-
+els predominantly rely on reconstruction-based objectives trained on real-world data, where anomalies are
+inferred indirectly from deviations between reconstructed and observed sequences.
+While intuitive, reconstruction models aim to capture dominant patterns rather than detect rare irregularities.
+Thisobjective mismatchintroduces fundamental limitations, as shown in Figure 1(a,b). First, subtle and
+contextual anomalies are often smoothed out, producing low reconstruction error and false negatives. Sec-
+ond, by learning ”average” normal patterns from training data, these models fail to reconstruct complex but
+normal sequences, leading to false alarms. Such weaknesses are exacerbated in zero-shot settings, where
+unseen normal patterns make reconstruction-based scores particularly unreliable.
+Additional fragilities arise from the limitations of real-world training data. First, labeled anomalies are
+inherentlyscarce, providing the model with few examples to learn abnormal behavior. Second, training
+data often lacksdiversity, covering only a subset of real-world patterns. In zero-shot scenarios, these data
+limitations leave models unexposed to many unseen normal and abnormal sequences, hindering their abil-
+ity to generalize and detect novel anomalies. To mitigate these issues, some approaches have focused on
+data augmentation, where artificial anomalies are injected into real-world time series to enrich the training
+set (Shentu et al., 2024; Darban et al., 2025; Cai et al., 2024). However, these methods are still fundamentally
+dependent on the availability and diversity of the underlying real data they seek to enhance. Consequently,
+in zero-shot and cross-domain scenarios, these data limitations leave models unexposed to many unseen
+normal and abnormal sequences, hindering their ability to generalize and detect novel anomalies.
+To address these limitations, we introduceTimeRCD, a novel foundation model for TSAD built on a new
+pre-training paradigm, as illustrated in Figure 1(c). Our approach abandons indirect reconstruction-based
+objectives in favor of explicitly learning to detect anomalies throughRelative Context Discrepancy(RCD).
+The fundamental insight behind RCD is that many anomalies, particularly subtle or contextual ones, are best
+identified not in isolation but as a significant discrepancy between the patterns of adjacent time windows.
+By capturing these relational differences, our model can detect shifts that single-window analysis would
+otherwise miss.
+For our pre-training process, we employ a standard Transformer backbone without any architectural mod-
+ifications. We treat each time window of a time series as an input token, which allows the self-attention
+2
+
+===== PAGE 3 =====
+Under review as a conference paper at ICLR 2026
+mechanism to naturally compute the inter-token relationships. As shown in Figure 1(c), the model’s at-
+tention weights learn to capture the discrepancy between contexts, effectively identifying anomalous RCD.
+An anomaly scoring head then uses these learned discriminative features to produce a final score. To teach
+the model this explicit detection strategy, we provide it with a rich, supervised signal by first leveraging a
+synthetic engine. This engine generates a large-scale, diverse, and fully-labeled corpus of time series data
+that is specifically designed to contain a wide variety of contextual anomalies, enabling the model to learn
+the RCD task from the ground up. Our main contribution are threefold:
+•The Relative Context Discrepancy (RCD) strategy and the TimeRCD modelWe introduce a novel
+pre-training paradigm for time series anomaly detection that moves beyond reconstruction by explic-
+itly learning to identify anomalies through RCD. This strategy is instantiated in our foundation model,
+TimeRCD, which uses a standard Transformer to capture relational differences between time windows.
+This design achieves strong zero-shot generalization through a simple yet powerful architecture.
+•A large-scale, fully-labeled synthetic corpus for foundation modelsTo enable the RCD pre-training
+paradigm and its rigorous evaluation, we construct a comprehensive synthetic corpus. It provides token-
+level annotations for a diverse spectrum of anomalies, including point, contextual, and collective types
+with cross-variate propagation, offering the essential supervision for building and evaluating zero-shot
+TSAD models on this corpus.
+•Extensive empirical evaluationExperiments on diverse corpora demonstrate consistent gains over ex-
+isting reconstruction-based and general-purpose time-series foundation models. Ablation studies confirm
+the contributions of both the synthetic corpus and the RCD framework to zero-shot performance.
+2 METHODOLOGY: THETIMERCD FRAMEWORK
+In this section, we first formally define the zero-shot time series anomaly detection task. We then present
+the RCD strategy and the foundation model architecture (Section 2.1), which employs an encoder-only
+Transformer. Finally, we introduce our synthetic data generation engine (Section 2.2), producing a rich,
+diverse, and precisely annotated training corpus.
+*L
+Any-VariateAttention
+Add & Norm
+Feed Forward
+Add & Norm
+Tokenization
+Output ProjectionAnomaly HeadReconstruction Head
+Positional  Encoding
+Time Series
+Figure 2: TimeRCD Architec-
+ture
+Problem DefinitionFor the zero-shot time series anomaly detec-
+tion problem, we observe a multivariated-channel time seriesX=
+(x1, . . . ,xn)withx t ∈R d for each time stept∈[n] :=
+{1,2, . . . , n}. The objective is to produce a binary annotation sequence
+ˆy= (ˆy 1, . . . ,ˆyn)∈ {0,1} n such thatˆyt = 1if and only if timetis
+anomalous. In the zero-shot setting, the model must detect anomalies on
+unseen target sequences without any additional training or fine-tuning,
+distinguishing normal from anomalous behavior.
+2.1 RCD STRATEGY ANDFOUNDATIONMODELARCHITECTURE
+Relative Context DiscrepancyWe introduce RCD to redefine zero-
+shot anomaly detection in time series. Rather than learning discriminative
+mappings from individual samples to labels, RCD formulates detection
+as comparing a set of time windows to extract discriminative relational
+patterns. This approach derives anomaly scores from relational compar-
+isons, enabling the model to detect subtle and comparative anomalies in
+unseen sequences under the zero-shot setting.
+Concretely, when each time window is treated as an input token, the Transformer’s self-attention effec-
+tively implements RCD: attention weights naturally capture relational discrepancies among windows within
+3
+
+===== PAGE 4 =====
+Under review as a conference paper at ICLR 2026
+the sequence context. This demonstrates that RCD-based anomaly detection can be directly realized using
+standard Transformer blocks. Building on this, we propose a novel foundation model, TimeRCD, illus-
+trated in Fig. 2, which adopts an encoder-only Transformer (Vaswani et al., 2017) with input tokenization,
+Transformer blocks, and output projection. Crucially, our approach leverages the existing Transformer ar-
+chitecture directly, requiring no structural modifications, which underscores both its simplicity and broad
+applicability.
+Variate-Window TokenizationWe adopt the common practice (Nie et al., 2022) and treat a window of
+continuous observations as an input token. Since multivariate anomaly detection is a critical task (Zaman-
+zadeh Darban et al., 2024), we build on the design introduced by Moirai (Woo et al., 2024), which flattens
+multivariate time series so that all variates are represented within a single sequence. This design allows the
+subsequent Transformer blocks to capture both intra-variate dependencies and inter-variate dependencies.
+Specifically, given a normalized multivariate time series ˜X∈R n×d, we partition it into⌈n/W⌉ ×dnon-
+overlapping windows, whereWdenotes the window length. The resulting windows are are then flattened
+andlinearly projected into input token embeddingsH inp ∈R ⌈n/W⌉d×D v.
+Transformer BlocksWe stackLtransformer blocks, each consisting of layer normalization, feed-forward
+network, and self-attention modules. The architecture imposes no special requirements on the Transformer
+block itself; however, the self-attention mechanism is repurposed to compute the RCD. Each token attends
+to other tokens, capturing inter-tokens differences that serve as contrastive features for subsequent anomaly
+score computation. Specifically, we leverage the any-variate attention (Woo et al., 2024) and formulate the
+output token embeddings asH out ∈R ⌈n/W⌉d×D v.
+Output Projection and Anomaly/Reconstruction HeadTo derive anomaly scores at the original tem-
+poral resolution, the output token embeddingsH out from the Transformer blocks are projected back
+into the observation space. Concretely, we define two heads during training:X rec =H outWsWrec
+andX ano =H outWsWano, whereW s ∈R Dv×Dv is the shared embedding projection,W rec ∈
+RDv×W andW ano ∈R Dv×W are the reconstruction and anomaly projection, respectively. The re-
+construction head predicts masked portions of the input series, while the anomaly head outputs window-
+level anomaly scores. Although the reconstruction head is discarded at inference, it acts as a cru-
+cial auxiliary task during training, encouraging the transformer blocks to learn rich, stable embed-
+dings beyond pairwise relational discrepancies. This effect is empirically validated in Appx. E.5.1.
+Figure 3: Synthetic data generation procedure.
+2.2 SYNTHETICDATAGENERATION
+We design a synthetic engine to generate multi-
+variate time series with rich, controllable contex-
+tual structures, creating a TSAD benchmark that en-
+courages models to recognize anomalies relative to
+context. The pipeline proceeds in three hierarchical
+stages: first, defining univariate contextual patterns
+(Phase 1); next, integrating them into a multivari-
+ate system with causal dependencies (Phase 2); and
+finally, injecting context-aware anomalies that de-
+pend on the system’s structure (Phase 3). A sum-
+mary is shown in Fig. 3, with full details in Appx. C.
+4
+
+===== PAGE 5 =====
+Under review as a conference paper at ICLR 2026
+Stage 1: Context-Template GenerationFor
+each channel, we generate normal context data from
+an additive template:x base(t) =T(t) +S(t) +
+ε(t), t= 0,1, . . . , n−1.The trend blends deter-
+ministic and stochastic components, i.e.,T(t) = (1−ρ T )T det(t) +ρ T Tstoc(t). Seasonality is a mixture
+of periodic atoms, i.e.,S(t) = PK
+k=1 Ak wk(2πfkt+φ k;θ k), wherew k spans sinusoid, square/triangle
+waves, and wavelet atoms with amplitudesA k, frequenciesf k, phasesφ k, and shape parametersθ k. Noise
+is zero-mean with optional piecewise volatility, e.g.,ε(t)∼ N
+ 
+0, σ 2(t)
+
+andσ(t)allowing bursty segments.
+The full description for constructing trend and seasonality is in Appx. C.2 and C.3.
+Stage 2: Joint-Context FusionTo simulate realistic inter-channel dependencies, we fuse per-channel
+contexts into a coherent multivariate system via a causal graphical model. We first sample a DAGG=
+(V, E)overNchannels (nodes) and define a latent causal processz i for each node. Discretizing first-order
+ODE dynamics by Euler (∆t= 1) gives an ARX system:z i[t] =a izi[t−1] + P
+j∈P(i) bijxj[t−ℓ ij] +
+ci,|a i| ≤0.8,with parent setP(i), lagsℓ ij, gainsb ij, and biasc i. The observed signal mixes baseline and
+causal channelsx i[t] = (1−α i)x base,i(t) +α i zi[t], αi ∈[0,1].
+Stage 3: Causal-contextual Anomaly InjectionMost existing works inject anomalies via simple point-
+wise corruption or handcrafted signal perturbations—procedures that ignore both temporal context and
+cross-variate dependencies. We term this classexogenous injections, where a multivariate normal system is
+first generated and then a window in one channel is overwritten, i.e.,x′
+anom,i[t] =x i[t]+∆(t)fort∈[t s, te).
+Beyond this, we introduce a novelendogenous injection mechanismthat intervenes prior to causal mixing.
+Specifically, we perturb the baseline signalxbase,i of a parent node, i.e.x ′
+base,i(t) =x base,i(t) + ∆(t)fort∈
+[ts, te),allowing abnormal effects to propagate to downstream nodesx ′
+anom,j[t]organically via the ARX
+dynamics. This process emulates internal system failures and yields multivariate anomalies with coherent
+temporal and structural footprints. We design more than 20 types of anomalies for∆(t)and also consider a
+type of contextual anomalies which modifies the periodic structure, e.g., replaceS(t)withS ′(t)to realize
+frequency or phase shifts within[t s, te). The full taxonomy and parameterizations are detailed in Appx. C.4.
+Stage 4: Labels and MasksWe generate token-level binary labels per channel. For exogenous injections,
+positives are exactly the intervention window on the edited channel. For endogenous injections, we label
+the root-cause window on the source channel and union it with descendant channels after their causal lags,
+as implied by the DAG and ARX lags{ℓ ij}. This yields two masks: root-cause and propagated effects,
+supporting evaluation that distinguishes localization from detection. Sequence lengths, DAG sparsity, ARX
+coefficients, and signal regimes (trend, seasonality, noise) are sampled from configurable priors (Appx. C.1),
+with all draws fully reproducible. This curriculum generates rich, interpretable dynamics and structured
+anomalies designed for zero-shot learning.
+Relative Context DiscrepancyThis layered generation process is designed to compel a model to learn
+RCD. Rather than identifying anomalies via absolute thresholds or isolated patterns, a model must deter-
+mine whether a data point is abnormal relative to its context. This context is multifaceted, including a
+variable’s own temporal dynamics (e.g., trend, seasonality), its causal relationships with other variables, and
+the characteristics of the anomaly itself. Ourendogenous anomalyinjection mechanism exemplifies this
+challenge: a deviation in a downstream “child” variable may be a propagated effect of an upstream “parent”
+failure. Correctly identifying only the root-cause anomaly requires the model to evaluate multiple variables
+in light of their causal dependencies. This encourages reasoning beyond simple pattern recognition toward
+a relational, system-level understanding—the essence of assessing relative discrepancy.
+5
+
+===== PAGE 6 =====
+Under review as a conference paper at ICLR 2026
+3 EXPERIMENTS
+To validate the effectiveness of TimeRCD, we design a comprehensive evaluation to answer three research
+questions:RQ1: How well does TimeRCD perform in strict zero-shot anomaly detection compared with
+existing time-series foundation models and with full-shot, dataset-specific baselines?RQ2: How does the
+RCD-based strategy exploit long contextual windows, and what is its impact on detecting contextual anoma-
+lies and on window-size sensitivity?RQ3: How do our synthetic generator and injection design affect
+performance, and how does accuracy scale with pre-training data size?
+3.1 EXPERIMENTALSETTINGS
+DatasetsOur evaluation is conducted on a comprehensive suite of 14 public time-series anomaly detection
+datasets, covering a wide range of real-world and synthetic scenarios. Details about the benchmark datasets
+can be found in the Appx. D.1.
+BaselinesWe benchmark TimeRCD against methods from two primary settings: (1)Zero-shot models,
+which include our approach and other foundation models (DADA†(Shentu et al., 2024), TS-Pulse (Ekam-
+baram et al., 2025), MOMENT†(Goswami et al., 2024), TimesFM (Das et al., 2024), Chronos (Ansari et al.,
+2024), Time MOE (Shi et al., 2024)). (2)Full-shot models, which are fitted on a per-dataset basis. This
+category includes deep learning methods (TranAD (Tuli et al., 2022), USAD (Audibert et al., 2020), Om-
+niAnomaly (Su et al., 2019)) and classical statistical algorithms (LOF (Breunig et al., 2000), IForest (Liu
+et al., 2008)). Note that models marked with (†) were excluded where necessary due to potential data leakage
+under zero-shot setting. Additionally details about all of the baseslines can be found at the Appx. D.2.
+Evaluation ProtocolWe evaluate model performance using four standard metrics: Affiliation-F1, F1-T,
+Standard-F1, and VUS-PR. We deliberately avoid using the Point-Adjusted F1 score, as recent work has
+demonstrated that Point Adjustment (PA) can lead to inflated and misleading performance evaluations (Huet
+et al., 2022; Wang et al., 2023a). More details about the metrics are shown in the Appx. D.3.
+3.2 MAINRESULTS: TSAD ACCURACY(RQ1)
+Our evaluation includes two comparisons: a directzero-shottest against foundation models, and afull-shot
+test against baselines trained on target data. We stress thatTimeRCDis strictly zero-shot in all settings,
+testing true out-of-the-box performance. Results are shown in Table 1. In zero-shot comparisons, TimeRCD
+achieves clear SOTA: on 56 univariate cases it ranks first in41and second in6. Even against full-shot
+baselines with access to target data, TimeRCD is highly competitive, ranking first in28and second in5.
+This strong showing highlights the power and generalizability of our pre-training framework.
+3.3 RCD STRATEGYEFFICIENCY(RQ2)
+Qualitative Analysis of Contextual UnderstandingA key architectural feature of TimeRCD is its abil-
+ity to process long context windows, allowing it to learn complex temporal dependencies. Many existing
+zero-shot methods, particularly those based on reconstruction with small look-up windows, are effective
+at detecting abruptpoint anomalies—short-term deviations from an immediate pattern (two left charts in
+Fig. 4). However, these models often fail on subtlecontextual, where the anomalous behavior is a deviation
+from a long-term pattern (two right charts in Fig. 4). Their limited context prevents them from distinguish-
+ing normal long-term variations from true anomalous segments. In contrast, as our qualitative results in
+Fig. 4 show, TimeRCD’s ability to view the entire series allows it to learn the complex relationships between
+distant points.
+6
+
+===== PAGE 7 =====
+Under review as a conference paper at ICLR 2026
+Table 1: Performance ofTimeRCDagainst zero-shot and full-shot baselines. TimeRCD operates in a strictly
+zero-shot capacity in all comparisons. Best result is inred, second-best is in blue . Asterisked (*) results are
+excluded from ranking due to data leaking.
+Metric Model Univariate Datasets Multivariate DatasetsTotalTotalIOPS MGAB NAB NEK Power SED TODS UCR YAHOOMSL PSM SMAP SMD SWaT1st 2ndZero-Shot Models
+Affiliation-F
+TimeRCD83.2870.6982.48 79.7385.51 96.8786.3784.63 96.6581.16 81.61 87.73 92.5871.5509 02DADA† 89.37* 67.66* 86.5695.4069.79 65.18 76.89 72.21 92.20*76.5781.2776.9283.7476.18 02 05TS-Pulse 68.76 67.33 70.80 73.05 69.94 67.44 67.90 67.70 70.0570.14 70.28 69.21 68.21 71.1800 00MOMENT†87.54* 66.76* 90.45* 92.26 75.9759.13 59.76 75.7779.99*74.55* 65.79 77.42* 74.00* 70.1700 02TimesFM 81.88 66.95 79.73 90.49 69.88 67.14 89.0870.03 91.28 20.35 71.24 45.44 62.85 44.3700 01Chronos 90.1267.8986.6693.6369.72 67.8991.9674.35 96.3475.52 70.88 72.22 75.31 70.4303 04Time MOE76.34 67.23 80.51 80.50 71.19 60.98 54.68 73.56 69.7069.85 54.74 74.38 69.97 64.3700 00
+F1T
+TimeRCD28.4401.81 38.8535.8728.47 69.43 65.89 34.30 85.8642.47 37.98 33.74 53.9130.2811 01DADA† 42.50* 00.91* 37.24 47.9819.80 09.56 35.18 07.22 79.52*34.5831.8430.4240.8035.13 01 05TS-Pulse 04.10 00.81 34.61 27.07 19.90 09.71 13.45 05.12 05.5023.57 25.39 12.34 09.15 28.5800 00MOMENT†33.15* 00.80* 52.27*63.6619.9109.54 17.47 13.0211.69*25.97* 27.77 17.93* 28.68* 28.7601 02TimesFM 48.9500.93 36.74 36.63 19.80 09.58 51.13 10.78 83.4607.83 25.42 11.64 18.65 21.3901 01Chronos 45.4501.1036.10 33.16 19.90 13.18 53.9010.88 79.00 15.59 25.42 11.72 17.32 28.8800 03Time MOE25.95 00.63 38.7015.78 19.85 17.7320.91 08.29 37.1123.92 26.82 14.22 19.90 30.1100 02
+Standard-F1
+TimeRCD24.2201.62 27.7033.0528.59 69.88 67.02 28.13 87.0230.66 26.00 30.48 44.8928.7311 01DADA† 32.76* 00.80* 26.9148.2415.99 02.69 28.18 03.36 79.30*22.1324.07 26.7534.9434.78 01 05TS-Pulse 03.54 00.73 21.61 23.96 18.2708.84 12.45 02.05 04.0012.56 22.31 07.44 08.00 23.8400 01MOMENT†30.69* 00.67* 44.75*63.8516.39 03.36 14.64 09.0010.54*14.43* 23.83 12.92* 29.78* 21.3001 01TimesFM 34.2800.83 26.46 38.15 16.73 02.96 40.08 07.86 84.4405.75 22.18 10.46 18.65 22.8401 01Chronos 32.6900.9926.22 33.54 17.47 08.74 40.5208.21 78.89 11.63 22.27 09.62 17.50 24.0300 03Time MOE26.52 00.45 26.20 11.47 12.16 17.7316.38 04.09 27.5012.85 24.8009.01 21.62 23.5800 02
+VUS-PR
+TimeRCD20.23 01.0524.3227.8821.25 80.75 93.46 23.0984.4120.45 18.69 22.68 37.0317.5810 02DADA† 24.97* 00.57*24.7346.8510.61 06.42 64.83 02.94 70.74*12.7417.1720.0225.9821.13 02 05TS-Pulse 04.64 00.56 16.40 19.39 11.7209.11 45.86 01.20 09.9307.41 14.48 03.99 04.56 15.6700 01MOMENT†37.35* 00.56* 45.38*67.7410.50 04.31 56.45 06.17 30.81*09.32* 16.48 08.97* 15.96* 14.9001 00TimesFM 19.5600.58 24.01 35.02 10.44 06.13 72.8906.0386.78 11.84 14.76 16.95 13.02 19.4301 03Chronos 19.00 00.6023.76 31.80 10.95 08.65 70.66 06.5683.54 08.25 14.61 05.18 10.22 16.4400 02Time MOE16.63 00.52 22.62 19.76 09.34 10.8748.78 02.10 20.9007.82 15.68 04.98 11.12 16.2000 01TimeRCD Grand Total (Zero-Shot) 41 06Full-Shot Models
+Affiliation-F
+TimeRCD83.28 70.6982.48 79.7385.51 96.87 86.37 84.63 96.6581.1681.6187.7392.5871.55 09 01TranAD 83.1967.28 90.28 85.02 71.56 61.03 52.76 73.31 76.0879.91 73.8387.39 92.2075.37 01 04USAD 71.08 67.81 91.5471.13 76.48 55.60 47.90 76.0053.05 81.86 57.86 87.25 85.09 75.0600 03OmniAnomaly80.32 67.3592.35 86.3078.1661.26 50.73 73.53 71.3183.1558.1791.3885.82 73.3903 02LOF 81.06 68.44 75.75 84.7466.76 63.85 60.5873.53 75.63 84.3561.98 63.32 64.13 56.3401 02IForest 52.81 68.8239.84 71.15 00.00 70.0944.17 50.56 33.3063.36 63.78 59.96 69.71 00.0000 02
+F1T
+TimeRCD28.4401.8138.85 35.8728.47 69.43 65.89 34.30 85.8642.4737.9833.7453.9130.2807 02TranAD 22.63 01.65 37.28 69.97 22.36 09.57 13.51 07.75 08.4139.42 25.49 29.12 37.98 49.5800 01USAD 20.9904.07 61.4670.6428.2309.54 20.85 14.6309.35 48.7128.96 43.9450.4150.41 03 05OmniAnomaly51.1701.61 40.0982.2023.48 09.6814.33 08.47 24.1649.3630.4246.6351.8446.64 04 04LOF 27.97 01.15 35.76 63.57 19.80 09.60 31.6308.31 55.93 38.97 25.58 21.81 10.13 30.6200 02IForest 07.64 00.84 21.44 65.56 00.00 09.54 11.06 06.36 04.9020.73 25.39 14.32 16.20 00.0000 00
+Standard-F1
+TimeRCD24.22 01.6227.70 33.0528.59 69.88 67.02 28.13 87.0230.66 26.00 30.48 44.89 28.7305 01TranAD 34.8501.46 27.33 60.36 22.36 02.63 11.94 04.40 05.7029.60 25.63 25.11 43.99 61.8601 01USAD 30.6603.89 56.1562.9128.2403.41 23.87 10.7407.21 38.7128.4138.6653.0662.82 03 07OmniAnomaly47.0501.44 28.8174.0323.50 00.43 12.65 05.11 21.4039.10 30.43 40.50 57.0655.9305 01LOF 30.28 01.05 24.04 56.92 12.18 04.1125.7704.70 48.95 30.65 18.80 18.70 08.41 29.0800 03IForest 08.37 00.73 29.4158.10 19.77 03.81 13.35 04.09 03.2014.68 24.15 13.61 16.89 26.7600 01
+VUS-PR
+TimeRCD20.2301.0524.32 27.8821.25 80.75 93.46 23.09 84.4120.4518.6922.68 37.0317.58 07 01TranAD 21.6100.64 24.82 61.63 13.04 05.75 47.33 02.25 25.7814.78 16.49 13.37 28.3447.3702 00USAD 16.58 00.7555.0358.5318.6804.37 56.3608.85 14.15 29.9517.59 26.3734.53 44.7301 08OmniAnomaly25.3500.64 27.1774.5114.32 06.20 45.55 02.40 29.2631.5718.5828.07 37.4442.9704 03LOF 19.43 00.57 21.18 58.52 09.31 06.81 49.14 02.39 41.3724.67 13.58 10.59 04.40 14.5000 01IForest 08.59 00.62 23.57 56.50 11.56 07.7146.62 02.88 10.4711.29 15.85 07.55 08.88 15.4900 01TimeRCDGrand Total (Full-Shot) 28 05
+Quantitative Analysis of Contextual UnderstandingWe create specialized, unseen datasets containing
+either purely point or contextual anomalies, ensuring a fair zero-shot evaluation (details in Appx. E.2).
+The results are in Fig. 5. While TimeRCD’s performance on point anomalies is highly competitive with
+other top zero-shot models, it is substantially superior on contextual anomalies. On this task, our model
+achieves aStandard-F1of 0.827, whereas all other models suffer a significant performance collapse.
+This performance disparity provides strong evidence that TimeRCD’s ability to leverage long-range context
+is a key capability, allowing it to detect complex deviations that are challenging for methods with a more
+limited contextual view.
+7
+
+===== PAGE 8 =====
+Under review as a conference paper at ICLR 2026
+Figure 4: Qualitative comparison of anomaly scores.
+Figure 5: Comparison on specially-created datasets containing either point or contextual anomalies.
+Impact of Context Window SizeTimeRCD’s ability to process variable context lengths is a core archi-
+tectural feature. To analyze its impact, we evaluate performance with input window sizes from 1k to 13k.
+As shown in Fig. 6, the results confirm that the optimal context length is task-dependent. For datasets with
+long-term patterns likeUCR,Power,SMAP, andSMDFig. 6 (a, b, d, e), performance generally improves
+with a larger window, as this allows the model to establish a more robust baseline of ”normal” behavior.
+Conversely, on inherently short series likeYAHOOFig. 6(c), performance remains flat, as the series length
+itself becomes the effective context limit. A detailed breakdown for all datasets is available in Appx. E.3.
+3.4 SYNTHETICDATAEFFICIENCY(RQ3)
+Ablation Study on Pre-training DataTo validate our data generation framework, we train on the same
+TimeRCD (architecture, hyperparameters, epochs) on three 350M-point datasets, each with 350M points
+to match the real-world data scale: (1) our synthetic data within-contextanomaly injection, (2) the same
+synthetic series but with DADA-injected anomalies (Shentu et al., 2024), and (3) real-world data (Godahewa
+et al.) augmented with DADA. Table 2 shows weighted averages over 9 univariate benchmarks (full results
+in Appx. E.4). Models trained on augmented real data performed far worse, confirming the necessity of
+a high-quality synthetic curriculum. Comparing the two synthetic variants reveals a key trade-off: though
+8
+
+===== PAGE 9 =====
+Under review as a conference paper at ICLR 2026
+Figure 6: Performance on univariate (top) and multivariate (bottom) datasets as a function of the input
+window size, varied from 1k to 13k.
+using DADA-injection achieves similar Affiliation-F and slightly higher VUS-PR, it causes sharp drops in
+finer-grained metrics (F1-T↓6.4%, Standard-F1↓6.1%). This indicates our in-context injection generates
+more challenging and robust training signals.
+Table 2: Weighted average performance across 9 univariate benchmarks.
+Pre-Training Dataset Affiliation-F F1-T Standard-F1 VUS-PR
+Our Synthetic Data0.878 0.569 0.5230.478
+Our Synthetic + DADA Injection0.8780.505 0.4620.487
+Real-world Data + DADA Injection 0.716 0.073 0.062 0.102
+Dataset ScalingTo investigate the effect of pre-training data scale on performance, we train TimeRCD on
+increasingly larger subsets of our synthetic dataset: 350M, 700M, and the full 2.5B data points. The results,
+shown as a weighted average across our benchmark datasets in the Fig. 7, demonstrate a clear and positive
+scaling law. As the amount of pre-training data increases, the model’s performance consistently improves
+across all four evaluation metrics.
+Figure 7: Demonstration of positive scaling laws. The figure shows weighted average performance across
+our benchmarks when training on datasets of increasing size (350M, 700M, 2.5B).
+4 CONCLUSION
+In conclusion, TimeRCD successfully addresses the objective mismatch in reconstruction-based methods by
+introducing the principle of Relative Context Discrepancy. This work establishes a new and effective pre-
+training paradigm for zero-shot TSAD, with its conceptual simplicity and strong empirical results opening
+several promising avenues for future research. Looking forward, the extensibility of our framework invites
+investigation into efficiently fine-tuning the pre-trained TimeRCD on domain-specific datasets for critical ap-
+plications. As a current limitation and future direction, our implementation relies on a standard transformer
+backbone; exploring novel network structures specifically engineered to more efficiently capture RCD could
+yield further performance gains and is a promising area for subsequent research.
+9
+
+===== PAGE 10 =====
+Under review as a conference paper at ICLR 2026
+ETHICS STATEMENT
+In alignment with the ICLR Code of Ethics, this research is committed to upholding the highest standards
+of academic integrity, social responsibility, and fairness by proactively identifying and mitigating poten-
+tial ethical risks, ensuring transparency in methodology and limitations, respecting privacy and consent in
+data usage, promoting inclusivity and non-discrimination, and avoiding any form of harm or misuse, while
+fostering a constructive and respectful scholarly environment for all participants and the broader community.
+REPRODUCIBILITYSTATEMENT
+We have made every effort to ensure that the results presented in this paper are reproducible. We ensure
+reproducibility by fully specifying our synthetic data generator (Appx. C). All evaluation datasets and splits
+follow the TSB-AD protocol described in Appx. D.1. Training configurations—model architecture, opti-
+mization, masking strategy, early stopping, and windowing—are detailed in Appx. D.4.
+REFERENCES
+Mohiuddin Ahmed, Abdun Naser Mahmood, and Md Rafiqul Islam. A survey of anomaly detection tech-
+niques in financial domain.Future Generation Computer Systems, 55:278–288, 2016.
+Abdul Fatir Ansari, Lorenzo Stella, Caner Turkmen, Xiyuan Zhang, Pedro Mercado, Huibin Shen, Olek-
+sandr Shchur, Syama Sundar Rangapuram, Sebastian Pineda Arango, Shubham Kapoor, et al. Chronos:
+Learning the language of time series.arXiv preprint arXiv:2403.07815, 2024.
+Julien Audibert, Pietro Michiardi, Fr ´ed´eric Guyard, S ´ebastien Marti, and Maria A Zuluaga. Usad: Un-
+supervised anomaly detection on multivariate time series. InProceedings of the 26th ACM SIGKDD
+international conference on knowledge discovery & data mining, pp. 3395–3404, 2020.
+Sathya Kamesh Bhethanabhotla, Omar Swelam, Julien Siems, David Salinas, and Frank Hutter.
+Mamba4cast: Efficient zero-shot time series forecasting with state space models.arXiv preprint
+arXiv:2410.09385, 2024.
+Markus M Breunig, Hans-Peter Kriegel, Raymond T Ng, and J ¨org Sander. Lof: identifying density-based
+local outliers. InProceedings of the 2000 ACM SIGMOD international conference on Management of
+data, pp. 93–104, 2000.
+Yifu Cai, Arjun Choudhry, Mononito Goswami, and Artur Dubrawski. Timeseriesexam: A time series
+understanding exam.arXiv preprint arXiv:2410.14752, 2024.
+Zahra Zamanzadeh Darban, Yiyuan Yang, Geoffrey I Webb, Charu C Aggarwal, Qingsong Wen, Shirui Pan,
+and Mahsa Salehi. Dacad: Domain adaptation contrastive learning for anomaly detection in multivariate
+time series.IEEE Transactions on Knowledge and Data Engineering, 2025.
+Abhimanyu Das, Weihao Kong, Rajat Sen, and Yichen Zhou. A decoder-only foundation model for time-
+series forecasting. InForty-first International Conference on Machine Learning, 2024.
+Samuel Dooley, Gurnoor Singh Khurana, Chirag Mohapatra, Siddartha V Naidu, and Colin White. Fore-
+castpfn: Synthetically-trained zero-shot forecasting.Advances in Neural Information Processing Systems,
+36:2403–2426, 2023.
+Vijay Ekambaram, Subodh Kumar, Arindam Jati, Sumanta Mukherjee, Tomoya Sakai, Pankaj Dayama,
+Wesley M Gifford, and Jayant Kalagnanam. Tspulse: Dual space tiny pre-trained models for rapid time-
+series analysis.arXiv preprint arXiv:2505.13033, 2025.
+10
+
+===== PAGE 11 =====
+Under review as a conference paper at ICLR 2026
+Shanghua Gao, Teddy Koker, Owen Queen, Tom Hartvigsen, Theodoros Tsiligkaridis, and Marinka Zitnik.
+Units: A unified multi-task time series model.Advances in Neural Information Processing Systems, 37:
+140589–140631, 2024.
+Rakshitha Godahewa, Christoph Bergmeir, Geoffrey I Webb, Rob J Hyndman, and Pablo Montero-Manso.
+Monash time series forecasting archive.
+Mononito Goswami, Konrad Szafer, Arjun Choudhry, Yifu Cai, Shuo Li, and Artur Dubrawski. Moment: A
+family of open time-series foundation models.arXiv preprint arXiv:2402.03885, 2024.
+Shi Bin Hoo, Samuel M¨uller, David Salinas, and Frank Hutter. From tables to time: How tabpfn-v2 outper-
+forms specialized time series forecasting models.arXiv preprint arXiv:2501.02945, 2025.
+Alexis Huet, Jose Manuel Navarro, and Dario Rossi. Local evaluation of time series anomaly detection
+algorithms. InProceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data
+Mining, pp. 635–645, 2022.
+Deepak A Kaji, John R Zech, Jun S Kim, Samuel K Cho, Neha S Dangayach, Anthony B Costa, and Eric K
+Oermann. An attention based deep learning model of clinical events in the intensive care unit.PloS one,
+14(2):e0211057, 2019.
+Tian Lan, Yifei Gao, Yimeng Lu, and Chen Zhang. Cicada: Cross-domain interpretable coding for anomaly
+detection and adaptation in multivariate time series.arXiv preprint arXiv:2505.00415, 2025.
+Fei Tony Liu, Kai Ming Ting, and Zhi-Hua Zhou. Isolation forest. In2008 eighth ieee international confer-
+ence on data mining, pp. 413–422. IEEE, 2008.
+Qinghua Liu and John Paparrizos. The elephant in the room: Towards a reliable time-series anomaly detec-
+tion benchmark.Advances in Neural Information Processing Systems, 37:108231–108261, 2024.
+Youngeun Nam, Susik Yoon, Yooju Shin, Minyoung Bae, Hwanjun Song, Jae-Gil Lee, and Byung Suk Lee.
+Breaking the time-frequency granularity discrepancy in time-series anomaly detection. InProceedings of
+the ACM Web Conference 2024, pp. 4204–4215, 2024.
+Yuqi Nie, Nam H Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is worth 64 words:
+Long-term forecasting with transformers.arXiv preprint arXiv:2211.14730, 2022.
+John Paparrizos, Paul Boniol, Themis Palpanas, Ruey S Tsay, Aaron Elmore, and Michael J Franklin. V ol-
+ume under the surface: a new accuracy evaluation measure for time-series anomaly detection.Proceedings
+of the VLDB Endowment, 15(11):2774–2787, 2022.
+Hansheng Ren, Bixiong Xu, Yujing Wang, Chao Yi, Congrui Huang, Xiaoyu Kou, Tony Xing, Mao Yang,
+Jie Tong, and Qi Zhang. Time-series anomaly detection service at microsoft. InProceedings of the 25th
+ACM SIGKDD international conference on knowledge discovery & data mining, pp. 3009–3017, 2019.
+M Saquib Sarfraz, Mei-Yen Chen, Lukas Layer, Kunyu Peng, and Marios Koulakis. Position: Quo vadis,
+unsupervised time series anomaly detection? InInternational Conference on Machine Learning, pp.
+43461–43476. PMLR, 2024.
+Lifeng Shen, Zhuocong Li, and James Kwok. Timeseries anomaly detection using temporal hierarchical
+one-class network.Advances in neural information processing systems, 33:13016–13026, 2020.
+Qichao Shentu, Beibu Li, Kai Zhao, Yang Shu, Zhongwen Rao, Lujia Pan, Bin Yang, and Chenjuan Guo.
+Towards a general time series anomaly detector with adaptive bottlenecks and dual adversarial decoders.
+arXiv preprint arXiv:2405.15273, 2024.
+11
+
+===== PAGE 12 =====
+Under review as a conference paper at ICLR 2026
+Xiaoming Shi, Shiyu Wang, Yuqi Nie, Dianqi Li, Zhou Ye, Qingsong Wen, and Ming Jin. Time-moe:
+Billion-scale time series foundation models with mixture of experts.arXiv preprint arXiv:2409.16040,
+2024.
+Ya Su, Youjian Zhao, Chenhao Niu, Rong Liu, Wei Sun, and Dan Pei. Robust anomaly detection for
+multivariate time series through stochastic recurrent neural network. InProceedings of the 25th ACM
+SIGKDD international conference on knowledge discovery & data mining, pp. 2828–2837, 2019.
+Ege Onur Taga, Muhammed Emrullah Ildiz, and Samet Oymak. Timepfn: Effective multivariate time se-
+ries forecasting with synthetic data. InProceedings of the AAAI Conference on Artificial Intelligence,
+volume 39, pp. 20761–20769, 2025.
+Shreshth Tuli, Giuliano Casale, and Nicholas R Jennings. Tranad: deep transformer networks for anomaly
+detection in multivariate time series data.Proceedings of the VLDB Endowment, 15(6):1201–1214, 2022.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser,
+and Illia Polosukhin. Attention is all you need.Advances in neural information processing systems, 30,
+2017.
+Garrett Wilson, Janardhan Rao Doppa, and Diane J Cook. Calda: Improving multi-source time series domain
+adaptation with contrastive adversarial learning.IEEE transactions on pattern analysis and machine
+intelligence, 45(12):14208–14221, 2023.
+Gerald Woo, Chenghao Liu, Akshat Kumar, Caiming Xiong, Silvio Savarese, and Doyen Sahoo. Unified
+training of universal time series forecasting transformers. 2024.
+Shifeng Xie, Vasilii Feofanov, Marius Alonso, Ambroise Odonnat, Jianfeng Zhang, Themis Palpanas, and
+Ievgen Redko. Cauker: classification time series foundation models can be pretrained on synthetic data
+only.arXiv preprint arXiv:2508.02879, 2025.
+Zhe Xie, Zeyan Li, Xiao He, Longlong Xu, Xidao Wen, Tieying Zhang, Jianjun Chen, Rui Shi, and Dan
+Pei. Chatts: Aligning time series with llms via synthetic data for enhanced understanding and reasoning.
+arXiv preprint arXiv:2412.03104, 2024.
+Jiehui Xu, Haixu Wu, Jianmin Wang, and Mingsheng Long. Anomaly transformer: Time series anomaly
+detection with association discrepancy.arXiv preprint arXiv:2110.02642, 2021.
+Yiyuan Yang, Chaoli Zhang, Tian Zhou, Qingsong Wen, and Liang Sun. Dcdetector: Dual attention con-
+trastive representation learning for time series anomaly detection. InProceedings of the 29th ACM
+SIGKDD conference on knowledge discovery and data mining, pp. 3033–3045, 2023.
+Zahra Zamanzadeh Darban, Geoffrey I Webb, Shirui Pan, Charu Aggarwal, and Mahsa Salehi. Deep learning
+for time series anomaly detection: A survey.ACM Computing Surveys, 57(1):1–42, 2024.
+Chuxu Zhang, Dongjin Song, Yuncong Chen, Xinyang Feng, Cristian Lumezanu, Wei Cheng, Jingchao Ni,
+Bo Zong, Haifeng Chen, and Nitesh V Chawla. A deep neural network for unsupervised anomaly detec-
+tion and diagnosis in multivariate time series data. InProceedings of the AAAI conference on artificial
+intelligence, volume 33, pp. 1409–1416, 2019.
+A USE OFLLMS
+In preparing our manuscript, we used large language models (LLMs) only to aid or polish the writing. Their
+use was restricted to improving grammar, readability, and style, without contributing to the methodology,
+theoretical results, algorithmic implementation, or experimental outcomes. The involvement of LLMs does
+not affect the reproducibility of our findings.
+12
+
+===== PAGE 13 =====
+Under review as a conference paper at ICLR 2026
+B RELATEDWORK
+State-of-the-art TSAD algorithmTraditional unsupervised TSAD operates by training models on
+domain-specific normal data to identify deviations in unseen test sets. Within this paradigm, two primary
+approaches have been dominant. Reconstruction-based methods identify anomalies by quantifying the error
+when attempting to rebuild an input signal, with higher errors indicating anomalous behavior (Audibert et al.,
+2020; Su et al., 2019; Zhang et al., 2019; Tuli et al., 2022; Nam et al., 2024). In parallel, contrastive-based
+methods learn discriminative representations by maximizing the distinction between normal and anomalous
+patterns or distributions (Xu et al., 2021; Yang et al., 2023; Shen et al., 2020; Darban et al., 2025; Lan et al.,
+2025; Wilson et al., 2023). However, the reliance of these methods on in-domain normal data presents a
+fundamental barrier to generalization, leading to significant performance degradation in zero-shot scenarios
+where the model encounters data from new, unseen domains. While the recent emergence of foundation
+models aims to overcome this transferability issue, the predominant architecture remains anchored in the
+reconstruction-based framework (Shentu et al., 2024; Gao et al., 2024; Goswami et al., 2024), which suffers
+fromobjective dismatch. We are the first to develop a foundation model for zero-shot TSAD built upon the
+principle of relative contextual discrimination, thereby circumventing the limitations of reconstruction-based
+approaches in zero-shot TSAD.
+Synthetic dataset for Time series analysisThe paradigm of leveraging synthetic data for pre-training
+time series models has been extensively validated, particularly in the domain of forecasting, where it has led
+to significant performance gains across various benchmarks (Xie et al., 2025; Cai et al., 2024; Dooley et al.,
+2023; Hoo et al., 2025; Taga et al., 2025; Bhethanabhotla et al., 2024). Following this trend, several founda-
+tion models for general time series analysis have been successfully trained on a hybrid corpus of real-world
+and synthetic data to enhance their generalization capabilities (Ansari et al., 2024; Das et al., 2024; Shi et al.,
+2024; Goswami et al., 2024). In contrast, the application of purely synthetic data for TSAD remains substan-
+tially less explored. Existing efforts in this area have primarily focused on data augmentation, where artificial
+anomalies are injected into real-world time series to enrich the training set (Shentu et al., 2024; Darban et al.,
+2025). While effective, these methods are still fundamentally dependent on the availability and diversity of
+the underlying real data. Other studies have discussed the generation of entirely synthetic anomalous time
+series but have not applied this data to the end-to-end training of a dedicated TSAD model (Cai et al., 2024;
+Xie et al., 2024). To the best of our knowledge, this work is the first to propose and successfully implement
+a pre-training framework for a foundation model dedicated to TSAD that relies exclusively on a large-scale,
+fully synthetic dataset.
+C DATAGENERATION
+Our synthetic data generation framework is designed as a curriculum to instill a universal understanding
+of temporal dynamics and causality in a model. The four-stage process is meticulously designed to first
+build a complex, predictable ”normal” context (Stages 1-2) and then introduce meaningful, context-violating
+anomalies (Stage 3). Finally, we generate causally-aware ground-truth labels that teach the model to link
+an anomaly’s root cause to its downstream effects (Stage 4), preparing it for zero-shot detection on unseen
+systems.
+Stage 1: Synthesizing the ”Normal” Univariate ContextEvery time series, whether it stands alone
+or is a component in a multivariate system, begins as a univariate baseline signal,x base(t). This signal is
+constructed as an additive composite of trend, seasonal, and noise components:
+xbase(t) =T(t) +S(t) +ε(t), t= 0,1, . . . , n−1.
+Sequence length.we samplenfrom 100 to 10000 to match variable-length sequences.
+13
+
+===== PAGE 14 =====
+Under review as a conference paper at ICLR 2026
+TrendT(t).We mix deterministic and stochastic trends:T det(t)andT stoc(t). SetT(t) = (1−ρ T )T det(t) +
+ρT Tstoc(t)withρ T ∈[0,1]. The detailed construction of trend is shown in Appendix C.2
+SeasonalityS(t).A mixture ofKperiodic atoms:
+S(t) =
+KX
+k=1
+Ak wk(2πfkt+φ k;θ k),
+wherew k is selected from a library (sinusoid, square/triangle wave, wavelet atom), with amplitudeA k >0,
+frequencyf k, phaseφ k, and shape parametersθ k (e.g., duty cycle for square, mother/scale for wavelets).
+Frequencies may be harmonicf k =m kf0 or incommensurate. The detailed construction of seasonality is
+shown in Appendix C.3
+Noiseε(t).Zero-mean noise with optional piecewise volatility:
+ε(t)∼ N
+ 
+0, σ 2(t)
+
+, σ(t) =σ 0
+RY
+r=1
+ 
+1 +υ r 1[ar,br)(t)
+
+,
+allowing volatility bursts over windows[a r, br). This captures heteroskedastic segments..
+Stage 2: Weaving the Multivariate Causal Context via a Discretized ODE SystemThis stage creates a
+multivariate system with clear causal dependencies. We first conceptualize continuous-time causal dynamics
+(ODE), then discretize to an AutoRegressive with eXogenous inputs (ARX) model via Euler.
+1.Generate a Causal Structure (DAG):Sample a directed acyclic graphG= (V, E)overNnodes
+by first drawing an Erd˝os–R´enyi graph and then orienting edges along a random topological order
+to avoid cycles. Edge presence is controlled byp edge ∈(0,1). An edge(j, i)∈Emeans seriesj
+causally influencesi.
+2.Define the Continuous-Time Causal Dynamics (ODE Model):We model the evolution of the
+causal influenceon each node,z i(t), as a first-order linear ODE. This equation describes how the
+influence on nodeichanges over time based on its own internal state and forcing from its parent
+nodesP(i):
+dzi(t)
+dt =−γ izi(t) +
+X
+j∈P(i)
+βijxj(t−τ ij) +C i
+Here,−γ izi(t)represents an internal decay term, the sum represents the forcing from parent nodes
+xj, andC i is a constant bias.
+3.Discretize to an ARX Model for Implementation:With Euler and∆t= 1, the discrete ARX is
+zi[t] =a izi[t−1] +
+X
+j∈P(i)
+bijxj[t−ℓ ij] +c i,|a i| ≤0.8,
+wherea i = 1−γ i encodes decay stability, delaysℓ ij ∈ {0, . . . , ℓ max}, andb ij are exogenous
+gains. We samplea i ∼ U[−0.8,0.8],ℓ ij ∼ U {0, . . . , ℓmax}, andb ij ∼ N(0, σ 2
+b)(variance scaled
+by in-degree).
+4.Mix the Signals:The observed node mixes baseline with causal channel:
+xi[t] = (1−α i)x base,i(t) +α i zi[t], α i ∈[0,1].
+In vector form (x[t], z[t]∈R N ),
+z[t] =A z[t−1] +
+ℓmaxX
+δ=0
+B(δ)x[t−δ] +c, x[t] = (I−A ′)x base(t) +A ′ z[t],
+whereA= diag(a i),A ′ = diag(αi), andB (δ) encodes lagged influences.
+14
+
+===== PAGE 15 =====
+Under review as a conference paper at ICLR 2026
+This process, performed sequentially according to the topological sort, creates a system where a change in a
+parent node will naturally propagate to its child nodes after a specified delay.
+Stage 3: Principled Anomaly Injection: Simulating Causal and Contextual ComplexityOur primary
+contribution in data generation lies in a synthetic framework designed to address critical gaps in existing
+anomaly detection benchmarks, namely the lack of causal realism and contextual complexity. To achieve
+this, our methodology introduces a novel causal framework for generating anomalies based on two distinct,
+complementary philosophies:
+•Endogenous Anomaly (Internal System Failure):This strategy simulates how a single root-cause
+anomaly propagates through an interconnected system. An anomaly is introduced into the baseline
+series of a parent nodebeforecausal mixing. Its effects are then passed to descendant nodes based
+on the ARX model, creating a realistic cascade of causally-linked anomalous events.
+•Exogenous Anomaly (External Shock):This mirrors more conventional techniques, modeling
+an external event impacting an otherwise normal system. The normal multivariate system is fully
+generated first, and then a segment of a single series is overwritten with an anomalous template.
+In addition to causal dynamics, we move beyond simple point anomalies by creating a rich taxonomy of
+contextual anomalies designed to violate specific, established patterns within the data. These include:
+•Local/Change Anomalies:Additive templates,∆(t), applied over a window, representing events
+like a sudden sensor glitch (Spike), a component failure shifting its baseline (Level Shift), or
+mechanical vibrations (Shake).
+x′
+anom(t) =x norm(t) + ∆(t)fort∈[t s, te)
+•Seasonal Anomalies:The normal seasonal componentS(t)is replaced with an altered version
+S′(t). They simulate systemic issues like a machine operating at the wrong speed (Frequency
+Change) or a process desynchronization (Phase Shift).
+x′
+anom(t) =T(t) +S ′(t) +ε(t)fort∈[t s, te)
+In contrast to methods that inject isolated anomalies into independent time series, our dual-pronged approach
+provides a more challenging and realistic benchmark. By generating complex scenarios with both contex-
+tual violations and causal propagation, our dataset enables a more robust evaluation of a model’s ability to
+understand system-wide dynamics. Details of constructing different abnormal types in the C.4
+C.1 HYPERPARAMETERS ANDSAMPLINGMAPPINGS
+To make the generation process transparent yet non-programmatic, we group hyperparameters into: dataset-
+level controls (Table 3); attribute families and their sampling weights (Table 4); multivariate graph and causal
+dynamics (Table 5).
+C.2 TRENDTYPES ANDFORMALDEFINITIONS
+We instantiate the trend componentT(t)using five archetypes aligned with the generator configuration. Let
+t∈ {0, . . . , n−1}.
+Increase / Decrease / Keep steady.We use an affine model
+T(t) =k 0 +k 1t,
+with constraints:increaseusesk 1 >0,decreaseusesk 1 <0, andkeep steadyusesk 1 = 0(constant
+baseline).
+15
+
+===== PAGE 16 =====
+Under review as a conference paper at ICLR 2026
+Table 3: Dataset-level generation controls and intended effects.
+Name Typical range / rule Applies to Intended effect
+Number of samples positive integer whole dataset Total number of generated sequences.
+Sequence length uniformly in{100, . . . ,10000}per sample Time horizon of each sequence.
+Anomalous-sample ratio real in[0,1]per sample Probability a sample contains anomalies.
+Multivariate flag{True, False}per sample Whether to generate multi-channel series.
+Number of features fixed or uniformly in{2, . . . ,50}multivariate only Channel count when multivariate.
+Random seed (optional) user-provided integer whole run Reproducibility of the random draws.
+Table 4: Attribute categories, options, and relative probability.
+Category Options Probability
+Seasonality type
+no periodic fluctuation 0.3sine 0.3square 0.05triangle 0.05wavelet 0.3
+Trend type
+decrease 0.2increase 0.2keep steady 0.2multiple 0.3ARIMA 0.1
+Frequency regimehigh frequency 0.5low frequency 0.5
+Noise level
+almost no noise 0.25low 0.25moderate 0.25high 0.25
+Multiple (piecewise trend).To capture mixed regimes, we allowPchange-points at integer knots0<
+τ1 <· · ·< τ P < nand define a piecewise-linear trend with slope updates:
+T(t) =k 0 +k 1t+
+PX
+p=1
+δp
+
+t≥τ p
+
+(t−τ p)+,
+where(u) + = max{u,0}andδ p adjusts slope after eachτ p. This matches the additive hinge construction
+used in Stage 1.
+ARIMA (stochastic trend).For stochastic trends we use a differenced ARMA process. Let∇ d be the
+d-th difference operator. A general ARIMA(p, d, q) satisfies
+ϕ(B)∇ dT(t) =θ(B)ε T (t), ε T (t)∼ N(0, σ 2
+T ),
+with backshiftB, AR polynomialϕ(B) = 1− Pp
+i=1 ϕiBi, and MA polynomialθ(B) = 1 + Pq
+j=1 θjBj.
+In practice we use small orders (e.g.,p, q≤2) and modest variance.
+C.3 SEASONALITYTYPES ANDFORMALDEFINITIONS
+We support five seasonal archetypes. Let the base period beP >0(in samples), frequencyf= 1/P,
+amplitudeA >0, and phaseφ∈[0,2π).
+No periodic fluctuation.No seasonality is present:
+S(t) = 0.
+16
+
+===== PAGE 17 =====
+Under review as a conference paper at ICLR 2026
+Table 5: Multivariate and causal-dynamics hyperparameters and intended roles.
+Name Typical range / rule Applies to Intended role
+Number of nodes Uniformly in 1 to 50 system graph Dimensionality of the multivariate system.Number of edges roughly linear in nodes (acyclic) system graph Connectivity while preserving acyclicity.Parent lags nonnegative integers up to a small fraction of length per edge Causal delays between channels.ARX autoregressionai real in[−0.8,0.8]per node Decay/stability of latent causal influence.ARX exogenous gainsbij zero-mean with finite variance per edge Strength of parent-to-child coupling.ARX biasci bounded real interval per node Baseline offset in causal channel.Mixing weightαi real in[0,1]per node Balance between baseline and causal channel.
+Sin periodic fluctuation.A sinusoidal component:
+S(t) =Asin
+ 
+2πf t+φ
+
+.
+Square periodic fluctuation.A rectangular wave with duty cycled∈(0,1):
+S(t) =Asgn
+ 
+sin(2πf t+φ)
+
+,
+or equivalently by its Fourier seriesS(t) = 4A
+π
+P
+modd m−1 sin(2πmf t+φ); duty-cycle variants modulate
+on/off durations per period.
+Triangle periodic fluctuation.A symmetric triangle wave of periodP:
+S(t) = 8A
+π2
+X
+modd
+(−1)(m−1)/2
+m2 sin(2πmf t+φ),
+equivalently realizable as a piecewise-linear ramp that rises and falls within each period.
+Wavelet periodic fluctuation.A sum of localized atoms (e.g.,db,sym,coif,haar,bior,dmey
+families):
+S(t) =
+LX
+ℓ=1
+Aℓ ψℓ
+ t−τ ℓ
+sℓ
+
+, A ℓ ∈R, s ℓ >0, τ ℓ ∈R.
+C.4 A TAXONOMY OFSYNTHETICANOMALYARCHETYPES
+Following the high-level description, we now provide complete, self-contained definitions and formulas for
+each anomaly type supported by our generator. We divide them into two families: Local/Change Anomalies
+(abrupt, windowed changes) and Seasonal Anomalies (contextual violations of periodic structure). We avoid
+shorthand; every symbol is explicitly defined. A comprehensive summary of all anomaly archetypes with
+intents and formal definitions is provided in Table 6.
+Notation and primitives.We use discrete time indext∈ {0,1, . . . , n−1}. The normal (anomaly-free)
+series is denoted byx norm(t). An anomaly acts on a closed-open window[t s, te)with integers0≤t s <
+te ≤n. The indicator function is
+1[ts,te)(t) =
+1, t s ≤t < t e,
+0,otherwise.
+The Heaviside step function at integer times isH(t;t 0) =1 [t0,∞)(t). For any scalaru, the logistic sigmoid
+isσ(u) = 1
+1+e−u . For a rectangular window we useh(t;t s, te) =1 [ts,te)(t). All amplitudesA, B,{A m}
+are real scalars; all durations and lags (e.g.,w, τ r, τf , d) are positive integers unless otherwise stated.
+17
+
+===== PAGE 18 =====
+Under review as a conference paper at ICLR 2026
+250 500 750 1000 1250 1500 1750 2000
+1
+0
+1
+2
+3
+Time Series Value
+Increase after upward spike
+1750 2000 2250 2500 2750 3000 3250 3500
+1
+0
+1
+2
+3
+Time Series Value
+Triangle pulse width modulation
+1500 1750 2000 2250 2500 2750 3000 3250
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+Time Series Value
+Outlier
+0 200 400 600 800 1000 1200 1400
+2.5
+2.0
+1.5
+1.0
+0.5
+0.0
+0.5
+Time Series Value
+Decrease after upward spike
+2000 2250 2500 2750 3000 3250 3500 3750
+1.50
+1.25
+1.00
+0.75
+0.50
+0.25
+0.00
+0.25
+Time Series Value
+Slow rise followed by rapid decline
+3500 3750 4000 4250 4500 4750 5000
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Time Series Value
+Sin remove harmonic
+500 750 1000 1250 1500 1750 2000 2250
+3
+2
+1
+0
+1
+2
+Time Series Value
+Sudden decrease
+3250 3500 3750 4000 4250 4500 4750 5000
+2
+1
+0
+1
+2
+Time Series Value
+Rapid decline followed by slow rise
+250 500 750 1000 1250 1500 1750 2000
+0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+Time Series Value
+Continuous upward spike
+1500 1750 2000 2250 2500 2750 3000 3250
+2
+1
+0
+1
+2
+3
+Time Series Value
+Downward convex
+4200 4400 4600 4800 5000
+3
+2
+1
+0
+1
+Time Series Value
+Sin modify harmonic mod phase
+2000 2250 2500 2750 3000 3250 3500 3750
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Time Series Value
+Upward convex
+2750 3000 3250 3500 3750 4000 4250 4500
+0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+Time Series Value
+Sin phase shift
+750 1000 1250 1500 1750 2000 2250 2500
+2.0
+1.5
+1.0
+0.5
+0.0
+0.5
+Time Series Value
+Sudden increase
+750 1000 1250 1500 1750 2000 2250 2500
+1.0
+0.5
+0.0
+0.5
+1.0
+Time Series Value
+Downward spike
+2250 2500 2750 3000 3250 3500 3750 4000
+3
+2
+1
+0
+1
+Time Series Value
+Decrease after downward spike
+1250 1500 1750 2000 2250 2500 2750 3000
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+Time Series Value
+Wavelet family
+3500 3750 4000 4250 4500 4750 5000
+2
+1
+0
+1
+2
+3
+Time Series Value
+Wavelet add wavelet
+3600 3800 4000 4200 4400 4600 4800 5000
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Time Series Value
+Increase after downward spike
+750 1000 1250 1500 1750 2000 2250 2500
+3.0
+2.5
+2.0
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+Time Series Value
+Wide downward spike
+3500 3750 4000 4250 4500 4750 5000
+2
+1
+0
+1
+2
+Time Series Value
+Wavelet amplitude
+1500 1750 2000 2250 2500 2750 3000 3250
+2.5
+2.0
+1.5
+1.0
+0.5
+0.0
+0.5
+Time Series Value
+Upward spike
+750 1000 1250 1500 1750 2000 2250 2500
+2
+1
+0
+1
+2
+3
+Time Series Value
+Slow decline followed by rapid rise
+1000 1250 1500 1750 2000 2250 2500 2750
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Time Series Value
+Rapid rise followed by slow decline
+750 1000 1250 1500 1750 2000 2250 2500
+Time Step
+2
+1
+0
+1
+2
+3
+Time Series Value
+Wavelet scale
+2750 3000 3250 3500 3750 4000 4250 4500
+Time Step
+1.0
+0.5
+0.0
+0.5
+1.0
+Time Series Value
+Shake
+2000 2250 2500 2750 3000 3250 3500 3750
+Time Step
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+Time Series Value
+Square pulse width modulation
+3600 3800 4000 4200 4400 4600 4800 5000
+Time Step
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+Time Series Value
+Wide upward spike
+3250 3500 3750 4000 4250 4500 4750 5000
+Time Step
+3
+2
+1
+0
+1
+Time Series Value
+Continuous downward spike
+4200 4400 4600 4800 5000
+Time Step
+3.0
+2.5
+2.0
+1.5
+1.0
+0.5
+Time Series Value
+Sin waveform
+Multi-Anomaly Type Visualization from Synthetic Dataset
+Time Series Values Anomaly Regions
+18
+
+===== PAGE 19 =====
+Under review as a conference paper at ICLR 2026
+C.4.1 LOCAL/CHANGEANOMALIES
+All local anomalies are applied additively within a window using a template∆(t):
+x′
+anom(t) =x norm(t) + ∆(t)1[ts,te)(t), t= 0,1, . . . , n−1.
+Spikes and bursts
+•Upward spike(a single sharp positive glitch). Parameters: center timet 0 ∈[t s, te), half-width
+w∈N +, amplitudeA >0. Define
+∆(t) =Amax
+
+1− |t−t 0|
+w ,0
+
+, t∈Z.
+•Downward spike(a single sharp negative glitch). Same parameters as above with negative ampli-
+tude:
+∆(t) =−Amax
+
+1− |t−t 0|
+w ,0
+
+.
+•Continuous upward spikes(a burst of multiple positive spikes). Parameters: spike countM∈
+N+, centers spaced by strided∈N +, per-spike amplitudesA m >0, per-spike widthsw m ∈N +.
+Define
+∆(t) =
+M−1X
+m=0
+Am max
+
+1− |t−(t 0 +md)|
+wm
+,0
+
+.
+•Continuous downward spikes(a burst of negative spikes). Use
+∆(t) =
+M−1X
+m=0
+(−Am) max
+
+1− |t−(t 0 +md)|
+wm
+,0
+
+.
+•Wide upward spike(longer rise, short plateau, and fall). Parameters: rise lengthτ r ∈N +, fall
+lengthτ f ∈N +, amplitudeA >0. Define
+∆(t) =
+
+
+
+A t−ts
+τr
+, t∈[t s, ts +τ r),
+A, t∈[t s +τ r, te −τ f),
+A
+ 
+1− t−(te−τf )
+τf
+
+, t∈[t e −τ f , te),
+0,else.
+•Wide downward spike(longer fall then recovery). Use the same piecewise definition with ampli-
+tude−A.
+•Outlier(single-point shock). Parameters: positiont 0 ∈[t s, te), amplitudeA∈R. Define the
+Kronecker impulse
+∆(t) =
+A, t=t 0,
+0, t̸=t 0.
+Level shifts and plateaus
+•Sudden increase(permanent level up-shift). Parameters: slope parameterκ >0, amplitudeA >0,
+change timet 0 ∈[t s, te). Define
+∆(t) =A σ
+ 
+κ(t−t 0)
+
+, σ(u) = 1
+1 +e −u .
+19
+
+===== PAGE 20 =====
+Under review as a conference paper at ICLR 2026
+•Sudden decrease(permanent level down-shift). Use
+∆(t) =−A σ
+ 
+κ(t−t 0)
+
+.
+•Convex/Concave plateau(temporary level change using a raised-cosine window). Parameters:
+window[t s, te), amplitudeA >0, signs∈ {+1,−1}(convex whens= +1, concave when
+s=−1). Define
+∆(t) =s A 1
+2
+
+1−cos π(t−t s)
+te −t s
+
+1[ts,te)(t).
+Asymmetric transients
+•Rapid rise followed by slow decline. Parameters: rise time constantτ r ∈N +, fall time constant
+τf ∈N +, peak timet p ∈[t s, te], amplitudeA >0. Define
+∆(t) =A
+
+1−e − t−ts
+τr
+
+1[ts,tp)(t) +A e
+−
+t−tp
+τf 1[tp,te)(t), τ r ≪τ f .
+•Slow rise followed by rapid decline. Use the same definition withτ r ≫τ f .
+•Rapid decline followed by slow rise. Use the above definition with amplitude−Aand swap
+rise/fall roles accordingly.
+•Slow decline followed by rapid rise. Use the rapid rise–slow decline formula with amplitude−A
+andτ r ≫τ f .
+Spike + level interaction
+•Decrease after upward spike. Parameters: spike template∆ spk(t)(e.g., the triangular spike
+above), post-spike shift magnitudeB >0, shift startt 1 ≥t s. Define
+∆(t) = ∆spk(t)−B H(t;t 1), H(t;t 1) =1 [t1,∞)(t).
+•Increase after downward spike. Using a negative spike template∆ nspk(t)and a positive shift
+B >0:
+∆(t) = ∆nspk(t) +B H(t;t 1).
+•Increase after upward spike. Use
+∆(t) = ∆spk(t) +B H(t;t 1).
+•Decrease after downward spike. Use
+∆(t) = ∆nspk(t)−B H(t;t 1).
+High-frequency burst
+•Shake(localized high-frequency vibration). Parameters: carrier frequencyf h ∈R >0 in cycles per
+sample, phaseφ∈[0,2π), amplitudeA >0. With a rectangular windowh(t;t s, te),
+∆(t) =A h(t;t s, te) sin(2πf ht+φ).
+20
+
+===== PAGE 21 =====
+Under review as a conference paper at ICLR 2026
+C.4.2 SEASONALANOMALIES
+Seasonal anomalies are implemented by replacing the seasonal componentS(t)with a modified component
+S′(t)strictly within the window[t s, te), while leaving the rest unchanged:
+x′
+anom(t) =
+T(t) +S ′(t) +ε(t), t s ≤t < t e,
+T(t) +S(t) +ε(t),otherwise.
+Universal transforms (any waveform)
+•Waveform inversion(polarity flip). Fort∈[t s, te), setS ′(t) =−S(t).
+•Amplitude scaling. Fort∈[t s, te), setS ′(t) =r S(t)with scaling factorr >0.
+•Frequency change. Let the original period beP >0and frequencyf= 1/P. Choose a period
+multiplierρ >0and set the new periodP ′ =ρPand frequencyf ′ = 1/P ′. For a sinusoid
+S(t) =Asin(2πf t+φ), defineS ′(t) =Asin(2πf ′t+φ)fort∈[t s, te).
+•Noise injection. Fort∈[t s, te), setS ′(t) =S(t) +η(t)with i.i.d. Gaussian noiseη(t)∼
+N(0, σ 2
+S).
+•Waveform change from sine to square/triangle. IfS(t)is sinusoidal with amplitudeAand period
+P, replace it by a square/triangle waveformw new(t;A, P, θ)of the same amplitude and period (with
+shape parametersθ) fort∈[t s, te).
+Sinusoidal-specific (harmonics and phase)Let a sinusoidal seasonal component be represented by a finite
+harmonic sum
+S(t) =
+NX
+n=1
+An sin
+ 
+2πnf t+φ n
+
+,
+and optionally include amplitude modulation for each harmonic via
+An(t) = An
+n (1 +d n sin(ωmt+ψ n)), d n ∈[0,1), ω m >0, ψ n ∈[0,2π).
+•Phase shift. Fort∈[t s, te), update all phases by a fixed shift∆φ∈(0,2π):φ n 7→φ n + ∆φ.
+•Add harmonic. Fort∈[t s, te), add a new harmonic of orderm∈N +:S ′(t) =S(t) +
+Ah sin(2πmf t+φ h)with amplitudeA h >0and phaseφ h ∈[0,2π).
+•Remove harmonic. Fort∈[t s, te), remove one existing harmonic indexn ∗ ∈ {1, . . . , N}from
+the sum, keeping the others unchanged.
+•Modify harmonic phase. Fort∈[t s, te), choose one indexn ∗ and setφ n∗ 7→φ ′
+n∗ such that
+|φ′
+n∗ −φ n∗ | ≥δfor a given thresholdδ >0.
+•Modify amplitude-modulation depth. Fort∈[t s, te), choose indexn ∗ and setd n∗ 7→d ′
+n∗ within
+[0,1).
+•Modify modulation frequency. Fort∈[t s, te), updateω m 7→ω ′
+m withω ′
+m >0.
+•Modify modulation phase. Fort∈[t s, te), choose indexn ∗ and setψ n∗ 7→ψ ′
+n∗.
+Square/Triangle-specific (pulse geometry)For a square or triangle waveform with periodP >0, define
+the duty cycled∈(0,1)as the fraction of each period the waveform is at its high level, and define a cycle
+start parameterδ∈[0,1)that shifts the waveform phase relative to each period.
+•Pulse shift. Fort∈[t s, te), apply a phase shift∆∈(−1,1)cycles:δ7→(δ+ ∆) mod 1.
+21
+
+===== PAGE 22 =====
+Under review as a conference paper at ICLR 2026
+•Pulse width modulation. Fort∈[t s, te), scale the duty cycle by a factorλ >0:d7→d ′ =
+min{1,max{0, λd}}.
+Wavelet-based (atoms and families)Let a wavelet-based seasonal component be represented as a finite
+sum of atoms
+S(t) =
+LX
+ℓ=1
+Aℓ ψℓ
+ t−τ ℓ
+sℓ
+
+, A ℓ ∈R, s ℓ >0, τ ℓ ∈R.
+•Family change. Fort∈[t s, te), replace each mother waveletψ ℓ taken from a familyFby a
+corresponding wavelet ˜ψℓ from a different family ˜Fwhile keepingA ℓ, sℓ, τℓ unchanged.
+•Scale change. Fort∈[t s, te), update scales by a factorλ >0:s ℓ 7→s ′
+ℓ =λs ℓ for selected indices.
+•Shift change. Fort∈[t s, te), update translations byτ ℓ 7→τ ′
+ℓ =τ ℓ + ∆τ,ℓ.
+•Amplitude change. Fort∈[t s, te), rescale coefficients byA ℓ 7→r ℓ Aℓ withr ℓ >0.
+•Add wavelet. Fort∈[t s, te), append a new atomA + ψ+
+  t−τ+
+s+
+
+with specified parameters.
+•Remove wavelet. Fort∈[t s, te), remove one existing atom index from the sum.
+22
+
+===== PAGE 23 =====
+Under review as a conference paper at ICLR 2026
+Table 6: Summary of anomaly archetypes, intents, and formal definitions.
+Family Type Intent (one sentence) Formal definition (within[t s, te))
+Local
+Upward spike A single sharp positive glitch∆(t) =Amax(1− |t−t 0|/w,0)Downward spike A single sharp negative glitch∆(t) =−Amax(1− |t−t 0|/w,0)
+Continuous upward spikes Rapid consecutive positive spikesPM−1
+m=0Ammax(1− |t−(t0+md)|/wm,0)
+Continuous downward spikes Rapid consecutive negative spikesPM−1
+m=0(−Am) max(1− |t−(t0+md)|/wm,0)Wide upward spike Longer rise/plateau/fall pulse piecewise linear rise/hold/fall with amplitudeAWide downward spike Longer fall/plateau/rise pulse piecewise linear with amplitude−AOutlier Single-point shock∆(t) =Aift=t 0, else0Sudden increase Permanent upward level shift∆(t) =A σ(κ(t−t 0))Sudden decrease Permanent downward level shift∆(t) =−A σ(κ(t−t 0))
+Convex/Concave plateau Temporary level changesA 12
+ 1−cos(π(t−ts)/(te−ts))
+Rapid rise→slow decline Fast excitation then slow decayA(1−e −(t−ts)/τr)1[ts,tp)+Ae−(t−tp)/τf1[tp,te)
+Slow rise→rapid decline Slow excitation then fast decay same as above withτr ≫τf
+Rapid decline→slow rise Fast drop then slow recovery negative-amplitude version of aboveSlow decline→rapid rise Slow drop then fast recovery negative-amplitude version of aboveDecrease after upward spike Spike followed by downward shift∆spk(t)−B H(t;t1)Increase after downward spike Negative spike then upward shift∆nspk(t) +B H(t;t1)Increase after upward spike Spike followed by upward shift∆spk(t) +B H(t;t1)Decrease after downward spike Negative spike then downward shift∆nspk(t)−B H(t;t1)Shake Localized high-frequency vibrationAsin(2πf ht+φ)within[ts, te)
+Seasonal
+Waveform inversion Polarity flip of seasonal componentS ′(t) =−S(t)Amplitude scaling Change seasonal magnitudeS ′(t) =r S(t)Frequency change Alter base period/frequencyS ′(t)withP′ =ρP(e.g.,f′ = 1/P′)
+Noise injection Add Gaussian noise to seasonalityS ′(t) =S(t) +η(t), η∼ N(0, σ2S)Waveform change (sin→square/triangle) Replace waveform familyS′(t) =wnew(t;A, P, θ)Phase shift (sinusoid) Global phase offsetφ n7→φn+ ∆φAdd harmonic (sinusoid) Introduce new harmonicS ′(t) =S(t) +Ahsin(2πmf t+φh)Remove harmonic (sinusoid) Remove one harmonic drop indexn ∗term inP
+n
+Modify harmonic phase Change one harmonic phaseφ n∗ 7→φ′n∗
+Modify amp-mod depth Change amplitude modulation depthdn∗ 7→d′n∗
+Modify modulation frequency Change modulation frequencyωm7→ω′m
+Modify modulation phase Change modulation phaseψ n∗ 7→ψ′n∗
+Pulse shift (square/triangle) Shift cycle startδ7→(δ+ ∆) mod 1Pulse width modulation Change duty cycled7→d ′ = min{1,max{0, λd}}
+Wavelet family change Swap mother wavelet familyψ ℓ ∈ F →˜ψℓ ∈ ˜FWavelet scale change Rescale atom widths ℓ 7→s′ℓ =λsℓ
+Wavelet shift change Shift atom translationτ ℓ 7→τ′ℓ
+Wavelet amplitude change Rescale atom amplitudeA ℓ 7→rℓAℓ
+Add wavelet atom Add new atom append(A +, s+, τ+, ψ+)Remove wavelet atom Remove existing atom delete one summand index
+23
+
+===== PAGE 24 =====
+Under review as a conference paper at ICLR 2026
+D DETAILS OF EXPERIMENTS
+D.1 BENCHMARKDATASETS
+Our evaluation uses a selection of datasets from one primary source, the TSB-AD benchmark by Liu &
+Paparrizos (2024).
+•Univariate Datasets: We utilize a diverse collection of univariate datasets including IOPS, MGAB,
+NAB, NEK, Power, SED, TODS, UCR, and Y AHOO.
+•Multivariate Datasets: For multivariate anomaly detection, we use the SWaT, SMAP, SMD, MSL,
+and PSM datasets. These are sourced from industrial control systems and spacecraft telemetry,
+presenting complex, multi-dimensional dependencies.
+The specific characteristics of these datasets, including their domain, number of time series (TS), average
+length, and anomaly ratio, are summarized in Table 7 and Table 8.
+Table 7: Univariate Datasets
+Name Domain #TS Avg Length AR (%)
+UCR Misc. 228 67818.7 0.6
+NAB Web 28 5099.7 10.6
+Y AHOO Web 259 1560.2 0.6
+IOPS Operations 17 72792.3 1.3
+MGAB Sensor 9 97777.8 0.2
+SED Energy 3 23332.3 4.1
+TODS Traffic 15 5000.0 6.3
+NEK Weather 9 1073.0 8.0
+Power Power Grid 1 35040.0 8.5
+Table 8: Multivariate Datasets
+Name Domain #TS Avg Length AR (%)
+MSL Space 16 3119.4 5.1
+PSM Sensor 1 217624.0 11.2
+SMAP Space 27 7855.9 2.9
+SMD Server 22 25466.4 3.8
+SWaT ICS 2 207457.5 12.7
+D.2 BASELINES
+Our study compares a range of baseline models, categorized into zero-shot and full-shot detectors, following
+the methodology from TSB-AD benchmark (Liu & Paparrizos, 2024) and the DADA (Shentu et al., 2024).
+Zero-Shot ModelsThese models are pre-trained on large-scale datasets and can be applied directly to new
+time series without fine-tuning.
+•DADA: This model, from the paper by (Shentu et al., 2024), is a pre-trained general anomaly
+detector. We set the window size to 100.
+24
+
+===== PAGE 25 =====
+Under review as a conference paper at ICLR 2026
+•TS-Pulse: An IBM foundation model that uses a TSMixer architecture (Ekambaram et al., 2025).
+It is pre-trained on a massive corpus for multi-task applications, including anomaly detection. Fol-
+lowing the suggestion from the paper, we set the window size with a length of 96.
+•MOMENT: A foundation model that utilizes a patch-based pre-training strategy to learn rich rep-
+resentations from diverse time series data (Goswami et al., 2024). We use a window size of 64.
+•TimesFM: A decoder-only transformer model from Google trained on a large time series corpus
+using a patching strategy, enabling strong zero-shot generalization (Das et al., 2024). We set the
+window size to 96.
+•Chronos: A generative model that frames time series analysis as a language modeling task, using
+a transformer-based architecture to learn and predict time series values (Ansari et al., 2024). Its
+window size is 100.
+•Time MOE: A decoder-only transformer model with a sparse Mixture-of-Experts (MoE) architec-
+ture. It is pre-trained on a large time series corpus for forecasting and multi-task learning (Shi et al.,
+2024). We set the window size to 96.
+Full-Shot ModelsThese models require training on the target dataset.
+•TranAD: A transformer-based model that uses a reconstructive approach to detect anomalies by
+comparing original and reconstructed time series (Tuli et al., 2022). It is configured with a window
+size of 10.
+•USAD: An autoencoder-based model that employs an adversarial training mechanism to enhance
+its reconstruction capability and anomaly detection (Audibert et al., 2020). We set the window size
+to 100.
+•OmniAnomaly: A deep learning model that uses a Variational Autoencoder (V AE) with a Gated
+Recurrent Unit (GRU) to learn normal patterns and detect deviations (Su et al., 2019). The model
+is configured with a window size of 100.
+•LOF: A traditional statistical method that measures the local deviation of a data point from its
+neighbors, identifying anomalies with lower local density (Breunig et al., 2000). For univariate
+datasets, we set n neighbors to 50, and for multivariate, we set n neighbors to 50 with metric as
+euclidean.
+•IForest: An ensemble of Isolation Trees that isolates anomalies based on the number of random
+partitions required to separate them from the rest of the data (Liu et al., 2008). For univariate
+datasets, we set n estimators to 200, and for multivariate, we set n estimators to 25 and max features
+to 0.8.
+D.3 EVALUATIONMETRICCALCULATIONS
+Our performance evaluation is conducted using four metrics: Affiliation F1 (F1 A), Temporal F1 (F1 T ),
+Standard F1 (F1), and VUS-PR. We adopt a selection of metrics from the TSB-AD benchmark (Liu &
+Paparrizos, 2024) for Affiliation F1 (F1 A), Standard F1 (F1), and VUS-PR. For Temporal F1, we follow
+the implmentation of Sarfraz et al. (2024).
+•Standard-F1The Standard F1-score is a widely used metric that provides a harmonic mean of
+precision and recall. It is calculated using point-wise True Positives (TP), False Positives (FP), and
+False Negatives (FN).
+•F1-TTemporal F1, as described by Sarfraz et al. (2024), is a range-based metric that evaluates
+anomaly detection performance by considering the temporal context of anomalies. It is a vari-
+25
+
+===== PAGE 26 =====
+Under review as a conference paper at ICLR 2026
+ant of the F1-score that addresses common issues in time series evaluation, such as overlapping
+predictions and temporal proximity.
+•Affiliation-F (F1 A)Affiliation F1 is a distance-based metric that measures the ”affiliation” or
+proximity between the ground truth and predicted anomaly points. It is designed to be less sensitive
+to minor temporal shifts in the predicted anomalies. The score is calculated by finding the optimal
+one-to-one mapping between the ground truth and detected anomalies and then computing the F1-
+score based on these affiliations (Huet et al., 2022).
+•VUS-PR(V olume Under Surface - Precision/Recall) is a threshold-independent, parameter-free
+metric for time series anomaly detection. Unlike point-wise metrics, VUS-PR is robust to time
+lags and measures the area under a 3D surface plot of precision, recall, and a buffer parameter
+(Paparrizos et al., 2022). It addresses the limitations of standard F1 scores by creating a continuous
+buffer region around each anomaly, thus providing a more reliable and nuanced evaluation of model
+performance.
+D.4 TRAININGDETAILS
+Pre-training SetupThe pretraining setup for our time series model is built around a transformer archi-
+tecture. This encoder features 8 transformer layers, each with 8 attention heads. The internal dimension
+(d model) of the model is 512, which is then projected down to a dimension of 256 (d proj). The input
+time series is divided into patches of size 16. The model is trained using theAdamWoptimizer with a learning
+rate of 5e-4 and a weight decay of 1e-5. The total loss is a sum of two components: a Mean Squared Error
+loss for a masked reconstruction task and a Cross-Entropy loss for an anomaly detection task. Training runs
+for a maximum of 50 epochs with a batch size that starts at 64 but is adjusted dynamically, and it includes
+an early stopping mechanism that halts training if the validation loss doesn’t improve for 7 epochs.
+Pre-training Dataset DetailsWe trained our modelonlyon our custom synthetic dataset, which com-
+prises a total of 2.5B data points. This dataset is composed of a vast number of individual time series with
+widely varying lengths. Figure 8 illustrates the distribution of these lengths. As the histogram shows, our
+pre-training curriculum follows a long-tailed distribution. It is dominated by a large volume of shorter series,
+which teaches the model common, localized patterns. Critically, it also includes a significant and diverse
+tail of longer series, with lengths extending up to 10,000 time steps. This diversity is fundamental to our
+approach. By pre-training on series of vastly different scales, the model learns to capture patterns across
+multiple temporal ranges and becomes well-equipped to handle the variable context lengths required for
+different downstream datasets.
+26
+
+===== PAGE 27 =====
+Under review as a conference paper at ICLR 2026
+Figure 8: Distribution of time series lengths within our 2.5B point synthetic pre-training dataset. The his-
+togram follows a long-tailed distribution, demonstrating that the pre-training curriculum is highly diverse. It
+contains a large volume of shorter series (under 4,000 steps) to teach common patterns, while also including
+a significant number of longer series (up to 10,000 steps) to ensure the model learns long-range temporal
+dependencies.
+27
+
+===== PAGE 28 =====
+Under review as a conference paper at ICLR 2026
+E EXTENDEDRESULTS ANDANALYSIS
+E.1 FULLRESULTS
+This section provides the complete, unabridged performance results that support the summary claims made
+in the main text.
+Experimental Setup and Zero-Shot ProtocolOur evaluation involves two distinct comparisons: (1) a di-
+rectzero-shotcomparison against other foundation models, and (2) a comparison againstfull-shotmodels
+where specialized baselines are trained on the target data. We emphasize thatour model remains strictly
+zero-shot in all settings, rigorously testing its out-of-the-box performance. In a direct comparison against
+other leading foundation models, our model demonstrates clear state-of-the-art (SOTA) capabilities. On the
+univariate benchmarks, our model ranks first in an overwhelming41cases and second in6. Even more im-
+pressively, when benchmarked against full-shot models that have the advantage of training on target-specific
+data, our zero-shot model proves highly competitive, securing the top rank in28univariate evaluations and
+second place in another5.
+Context Window Size Parameters for Main ResultsFor the main results presented in Table 1, a context
+window size was selected for each dataset based on the analysis in Appendix E.3 to optimize performance.
+Specifically, for most univariate datasets, a window size of5kwas used. Exceptions were made for theNAB
+dataset, where a smaller1kwindow was found to be optimal, and the long-seriesPowerdataset, where the
+maximum tested13kwindow yielded the best results. For all five multivariate datasets, a context window of
+13kwas applied to best capture their complex, inter-channel dependencies.
+E.2 CONTEXTUALANALYSIS
+To provide a controlled environment for testing our model’s contextual understanding, we generated a new
+suite of specialized, unseen test datasets. The objective was to create two distinct sets: one containing only
+point anomaliesand another containing onlycontextual anomalies. This section details their construction
+process.
+General Construction ProcessEach dataset was generated using the framework described in the main
+paper, with a crucial modification: only one type of anomaly was injected per set. We first synthesized
+a complex ”normal” baseline series, combining trend, seasonal, and noise components. We then injected
+specific anomalies into these clean series to create our test cases. These datasets were not used in any part
+of the pre-training process.
+Point Anomaly DatasetsPoint anomalies are defined as short-term, localized deviations that can be iden-
+tified by comparing a data point to its immediate neighbors, without requiring long-range context.
+Contextual Anomaly DatasetsContextual anomalies are defined as deviations from a long-term, estab-
+lished pattern, such as a disruption in a seasonal cycle. Detecting them requires the model to understand the
+global structure of the time series.
+Dataset SummaryThe final collection consists of two distinct sets of time series, with their key charac-
+teristics summarized in Table 9.
+28
+
+===== PAGE 29 =====
+Under review as a conference paper at ICLR 2026
+Table 9: Quantitative comparison on specialized Point and Contextual anomaly datasets. The table is
+grouped by anomaly type, with metrics listed vertically for each. Our model demonstrates competitive
+performance on point anomalies and substantially superior performance on contextual anomalies across all
+metrics. Best results in each row are highlighted inbold.
+Type Metric Our Model Chronos DADA MOMENT TSPulse Time MOE TimesFM
+Point
+Affiliation-F 0.9120.899 0.823 0.886 0.733 0.793 0.889
+F1T 0.6040.441 0.387 0.551 0.214 0.303 0.446
+Standard-F1 0.5210.352 0.121 0.472 0.090 0.149 0.397
+VUS-PR 0.6660.293 0.396 0.538 0.063 0.190 0.385
+Contextual
+Affiliation-F 0.9490.804 0.721 0.813 0.730 0.756 0.792
+F1T 0.7810.174 0.227 0.284 0.210 0.269 0.154
+Standard-F1 0.8270.154 0.048 0.172 0.088 0.078 0.140
+VUS-PR 0.8790.108 0.132 0.169 0.056 0.063 0.101
+E.3 WINDOWSIZESENSITIVITYANALYSIS
+In this section, we show the detailed performance of our model across different context window sizes (from
+1k to 13k) for each of the four primary evaluation metrics. The following figures provide a per-dataset
+breakdown, which supports the summarized analysis presented in the main paper.
+The results in Figures 9 through 12 empirically validate our key finding: the optimal context length is task-
+dependent, and datasets with long-term or complex structures see a clear benefit from larger window sizes.
+•Positive Scaling Trend:A strong positive correlation between window size and performance is
+evident for several datasets across most metrics. For example,Power,UCR,MGAB,SMD, and
+SMAPall demonstrate a general upward trend, especially on the F1-T, Standard-F, and VUS-PR
+metrics. This confirms that for these series, a larger context provides a more robust understanding
+of ”normalcy”, leading to better anomaly detection.
+•Flat Performance on Short Series:In contrast, datasets with inherently short time series, such
+asYAHOO,NEK, andTODS, show a flat performance profile. Their scores remain largely un-
+changed regardless of the window size. This is the expected behavior, as the length of the time
+series itself acts as the natural context limit, and the model correctly avoids computing attention
+over non-existent data.
+•Task-Dependent Fluctuation:Other datasets, likeNAB,PSM, andSWaT, exhibit more fluc-
+tuating or non-monotonic behavior. For these, the ideal window size varies, with performance
+sometimes peaking at intermediate lengths. This underscores the value of having a flexible archi-
+tecture where the context window can be tuned as a hyperparameter to achieve optimal results for
+a specific task.
+•Metric Sensitivity:It is also noteworthy that the ‘Affiliation-F‘ metric (Figure 9) generally appears
+less sensitive to changes in window size compared to the other three metrics. This suggests that
+while a larger context may be crucial for the precise, point-wise accuracy captured by metrics like
+‘Standard-F1‘, the broader, proximity-based evaluation of ‘Affiliation-F‘ is less affected.
+These detailed results collectively reinforce the conclusion that the model’s ability to handle extensive,
+variable-length contexts is a powerful and necessary feature for a general-purpose time-series anomaly de-
+tector.
+29
+
+===== PAGE 30 =====
+Under review as a conference paper at ICLR 2026
+Figure 9: Affiliation-F performance across all 14 datasets as a function of the input window size from 1k to
+13k.
+30
+
+===== PAGE 31 =====
+Under review as a conference paper at ICLR 2026
+Figure 10: F1T performance across all 14 datasets as a function of the input window size from 1k to 13k.
+31
+
+===== PAGE 32 =====
+Under review as a conference paper at ICLR 2026
+Figure 11: Standard-F1 performance across all 14 datasets as a function of the input window size from 1k to
+13k.
+32
+
+===== PAGE 33 =====
+Under review as a conference paper at ICLR 2026
+Figure 12: VUS-PR performance across all 14 datasets as a function of the input window size from 1k to
+13k.
+33
+
+===== PAGE 34 =====
+Under review as a conference paper at ICLR 2026
+Table 10: Impact of Context Window Size: A comprehensive performance comparison of our model with
+varying context window sizes across all univariate and multivariate benchmark datasets. Best results for
+each dataset-metric combination are highlighted inred, and second-best are in blue .
+Metric Model Univariate Datasets Multivariate Datasets Total Total
+IOPS MGAB NAB NEK Power SED TODS UCR YAHOO MSL PSM SMAP SMD SWaT 1st 2nd
+Affiliation-F
+1k 85.64 67.3281.2870.87 69.30 87.0787.5681.34 94.73 78.50 78.36 80.16 81.11 69.93 02 02
+2k 84.41 66.97 77.01 70.87 78.73 91.51 87.24 81.54 94.79 79.63 81.04 81.80 85.99 71.00 00 04
+3k 86.2569.50 78.60 70.87 77.83 92.15 86.73 82.88 94.79 80.27 81.12 81.77 87.30 68.87 01 02
+4k 83.61 69.41 78.48 70.87 75.57 94.57 86.48 84.12 94.79 80.75 80.75 82.68 88.48 72.12 00 04
+5k 84.79 70.69 79.7079.7368.30 96.87 85.91 84.6396.65 79.90 79.35 78.04 85.94 71.93 02 00
+6k 82.30 69.08 78.49 70.87 71.10 96.92 85.91 82.75 94.79 79.90 81.11 80.25 87.07 71.79 00 02
+7k 83.72 70.24 81.00 70.87 75.32 96.92 85.91 82.55 94.79 79.90 80.67 81.23 86.7674.03 01 03
+8k 83.65 69.58 80.40 70.87 75.77 95.22 85.91 84.95 94.79 79.9082.5681.23 87.14 73.29 01 04
+9k 84.90 71.07 80.97 70.87 70.83 97.66 85.91 83.46 94.79 79.90 77.94 81.23 86.59 73.10 00 04
+10k 84.0272.4579.74 70.87 73.4897.7785.91 84.70 94.79 81.1380.5584.1089.03 71.65 04 03
+11k 84.54 68.39 80.08 70.87 74.96 97.36 85.91 84.03 94.79 81.1380.6284.1087.85 72.69 02 02
+12k 83.91 70.79 78.67 70.87 77.39 95.27 85.9185.0694.79 81.1380.9484.10 89.0971.41 04 02
+13k 83.98 69.82 79.96 70.87 79.7395.44 85.91 84.24 94.79 81.1381.61 84.1088.29 71.55 03 03
+F1 T
+1k 31.7701.59 23.07 35.60 11.22 51.6371.9124.6688.38 39.60 28.22 29.30 36.13 28.53 03 01
+2k 27.60 01.68 21.11 35.60 07.27 57.90 69.97 29.79 88.12 40.45 34.16 30.72 47.63 27.91 00 03
+3k 27.58 01.57 21.94 35.60 11.66 58.75 69.80 31.96 88.12 39.99 33.75 31.43 46.19 28.39 00 02
+4k 25.68 02.14 22.36 35.60 15.44 64.61 67.01 33.10 88.12 42.4733.95 33.59 49.98 28.60 01 03
+5k 27.70 01.8142.90 35.8720.17 69.43 65.89 34.30 85.86 41.54 33.19 32.22 48.64 27.75 02 01
+6k 27.13 02.39 22.17 35.60 13.87 72.40 65.85 33.31 88.12 41.54 37.7533.6651.73 29.42 01 03
+7k 26.31 02.21 24.95 35.60 18.83 70.80 65.85 35.33 88.12 41.54 39.5333.28 49.54 28.80 01 03
+8k 28.84 02.13 25.09 35.60 24.36 70.86 65.85 35.57 88.12 41.54 33.77 33.28 51.83 28.44 00 04
+9k 28.78 02.35 25.12 35.60 19.8074.6565.85 34.68 88.12 41.54 35.46 33.28 49.5430.30 02 04
+10k 28.42 02.91 25.08 35.60 23.66 73.61 65.85 35.27 88.12 41.54 39.22 33.28 51.77 23.73 00 06
+11k 25.45 02.79 24.99 35.60 21.51 71.50 65.8536.8988.12 41.54 36.75 33.28 51.52 29.27 01 03
+12k 27.90 02.43 22.86 35.60 24.40 69.70 65.85 36.03 88.12 41.54 36.48 33.2853.0230.28 01 05
+13k 30.77 03.3124.19 35.60 25.9270.33 65.85 36.23 88.12 41.54 37.98 33.28 50.73 30.28 02 06
+Standard-F1
+1k 23.61 01.41 27.68 29.38 16.57 51.8971.0020.30 85.54 27.22 24.47 22.56 29.59 24.17 01 02
+2k 22.10 01.58 26.45 29.38 16.92 58.24 69.76 23.84 85.33 28.58 25.43 25.11 39.08 24.48 00 02
+3k 19.26 01.46 30.84 29.38 19.46 59.15 69.74 26.39 85.33 29.48 22.58 24.27 38.33 26.76 00 01
+4k 17.04 01.97 31.20 29.38 20.02 65.02 68.05 27.58 85.33 30.6625.68 26.89 41.35 24.96 01 02
+5k 20.51 01.62 32.4633.0515.59 69.88 67.01 28.1387.02 29.95 23.91 26.54 40.45 17.18 02 01
+6k 19.40 02.15 31.27 29.38 20.70 72.71 67.01 27.46 85.33 29.95 24.61 28.57 42.90 20.40 00 03
+7k 21.23 02.00 32.90 29.38 21.76 71.16 67.01 28.28 85.33 29.95 17.0929.9340.56 26.70 01 02
+8k 23.08 01.91 32.91 29.38 24.88 71.26 67.01 30.04 85.33 29.95 22.5029.9343.25 23.07 01 05
+9k 25.3802.06 32.70 29.38 21.4775.0067.01 28.53 85.33 29.95 16.0029.9341.44 28.69 03 03
+10k 24.14 02.59 32.9429.38 25.52 74.07 67.01 29.50 85.33 29.95 20.0129.9343.08 24.36 02 04
+11k 20.96 02.46 32.72 29.38 25.15 71.89 67.0130.2685.33 29.95 17.7429.9342.80 26.63 02 02
+12k 22.21 02.22 31.45 29.38 25.84 70.16 67.01 29.85 85.33 29.95 23.2729.93 43.3327.63 02 03
+13k 24.81 02.9932.13 29.38 26.8870.76 67.01 29.92 85.33 29.95 26.00 29.9342.0528.73 05 03
+VUS-PR
+1k 18.80 0.8100 24.32 24.78 10.64 48.6894.8915.22 82.02 17.45 16.33 14.68 17.35 15.16 01 01
+2k 17.03 0.9600 23.23 24.78 09.97 59.79 94.86 18.11 82.78 18.23 17.48 17.59 26.41 15.77 00 03
+3k 17.66 0.9200 26.58 24.78 11.64 65.57 94.46 20.69 82.78 18.94 16.10 16.02 25.97 16.09 00 02
+4k 13.74 01.19 27.13 24.78 12.05 73.53 93.80 21.53 82.78 20.4517.76 19.27 29.57 15.70 01 02
+5k 15.71 01.05 29.0227.8809.88 80.75 93.46 23.0984.41 19.61 16.67 18.62 27.89 13.17 02 01
+6k 15.67 01.28 27.13 24.78 11.96 86.59 93.46 21.52 82.78 19.61 18.01 20.66 31.37 14.08 00 05
+7k 18.53 01.23 29.43 24.78 13.50 84.32 93.46 23.14 82.78 19.61 14.8521.5328.31 16.24 01 03
+8k 18.75 01.31 29.66 24.78 15.98 86.40 93.46 24.45 82.78 19.61 15.8221.5331.83 15.53 01 03
+9k 23.2601.41 29.67 24.78 13.3592.8693.46 22.99 82.78 19.61 13.3921.5329.91 17.35 03 04
+10k 20.9101.45 29.7924.78 16.30 91.36 93.46 24.10 82.78 19.61 15.5921.5332.00 13.59 03 05
+11k 19.38 01.20 29.74 24.78 15.86 87.48 93.4625.2682.78 19.61 14.2221.5331.59 16.00 02 04
+12k 20.13 01.42 27.82 24.78 18.38 85.60 93.46 24.20 82.78 19.61 16.6521.53 32.5117.13 02 04
+13k 22.00 01.43 29.14 24.78 19.0586.77 93.46 24.99 82.78 19.61 18.70 21.5330.5817.58 04 06
+34
+
+===== PAGE 35 =====
+Under review as a conference paper at ICLR 2026
+E.4 ANALYSIS FORABLATIONSTUDY ONPRE-TRAININGDATA
+In this section, we provide a detailed, per-dataset analysis of the ablation study on our pre-training data,
+which supports the weighted average results discussed in the main paper.
+Experimental SetupTo rigorously validate our data generation framework, we conducted a controlled
+experiment. We trained our model on three distinct pre-training datasets, each standardized to 350M data
+points. A completely identical training protocol—including the same model architecture, hyperparameters,
+and number of training epochs—was used for each run to isolate the impact of the data itself. The three
+datasets were:
+1.Our Synthetic Data:Generated entirely by our proposed framework, including our custom,
+context-aware anomaly injection techniques.
+2.Our Synthetic Data + DADA Injection:The same base time series as above, but with anomalies
+introduced using the generic DADA injection method described by Shentu et al. (2024).
+3.Real-world Data + DADA Injection:A dataset created by applying DADA injection to real-world
+time series from the Monash forecasting repository Godahewa et al..
+Univariate Setting JustificationThis experiment was conducted exclusively in a univariate setting for
+two primary reasons. First, the large-scale real-world dataset available for creating a comparable baseline
+(Monash) is predominantly comprised of univariate series. Second, the DADA anomaly injection technique,
+as described in their original paper, is designed for and implemented on univariate time series. This constraint
+ensures a fair and direct comparison between the different data generation strategies.
+Detailed Results and AnalysisTable 11 presents the full, per-dataset results for the nine univariate bench-
+marks used in this study. These results offer a more granular view than the weighted averages in the main
+text.
+The per-dataset results first confirm the main conclusion: the model pre-trained on augmented real-world
+data demonstrates significantly inferior performance across most datasets and metrics, particularly on the F1-
+based scores. This validates our hypothesis that a purpose-built synthetic curriculum is superior to simply
+augmenting existing real-world series.
+More interestingly, the table reveals the nuances behind the weighted average comparison between our two
+synthetic strategies. While the ”Our Synthetic Data + DADA Injection” strategy secures more first-place
+finishes on a per-dataset basis (e.g., strong performance on IOPS and NAB), our custom injection method
+(”Our Synthetic Data”) achieves higher scores on other key datasets like TODS and Y AHOO. The fact that
+our method yields a better weighted average onF1 T and Standard-F1 (as mentioned in the main paper)
+suggests that its performance is more stable or that it excels on datasets that have a greater influence on
+the overall average. This highlights a critical trade-off: DADA’s generic injections can be highly effective
+for specific data profiles, whereas our context-aware injection methods appear to provide a more consis-
+tent and robust performance across a wider range of scenarios, leading to better overall performance on the
+most stringent metrics. Ultimately, this detailed analysis reinforces that our end-to-end synthetic data gen-
+eration framework provides the most effective training curriculum for achieving state-of-the-art zero-shot
+performance.
+35
+
+===== PAGE 36 =====
+Under review as a conference paper at ICLR 2026
+Table 11: Performance comparison across different models and metrics. Best results for each dataset-metric
+combination are highlighted inred, and second-best are in blue .
+Metric Model Datasets Total Total
+IOPS MGAB NAB NEK Power SED TODS UCR YAHOO 1st 2nd
+Affiliation-F
+Our Synthetic Data 89.37 68.55 88.74 79.27 63.31 89.24 83.26 83.8892.35 02 05
+Our Synthetic Data + DADA Injection 90.50 68.67 88.8079.60 78.52 94.0480.92 82.43 93.63 06 03
+Real-world Data + DADA Injection 70.98 67.59 81.9982.6170.73 62.18 55.56 74.80 68.41 01 01
+F1 T
+Our Synthetic Data 36.08 01.08 25.69 55.06 06.23 53.92 58.7631.59 85.99 02 04
+Our Synthetic Data + DADA Injection 53.11 01.91 34.9159.59 13.16 61.4557.66 32.7468.57 06 03
+Real-world Data + DADA Injection 06.80 01.35 23.1870.6510.01 0.1700 09.67 05.25 05.37 01 02
+Standard-F1
+Our Synthetic Data 30.63 01.13 30.12 50.89 17.39 54.18 61.6624.38 82.16 02 06
+Our Synthetic Data + DADA Injection 46.46 01.74 34.6548.9019.53 61.4359.62 26.2065.66 06 02
+Real-world Data + DADA Injection 11.02 01.32 26.1766.9717.09 03.08 11.99 03.83 03.53 01 01
+VUS-PR
+Our Synthetic Data 24.07 0.7000 27.16 48.66 09.66 61.63 88.62 20.5974.68 01 07
+Our Synthetic Data + DADA Injection 45.24 0.9500 32.2248.5212.60 65.09 93.4819.17 75.67 07 01
+Real-world Data + DADA Injection 08.88 0.6400 24.5469.7511.09 06.69 45.82 02.12 12.18 01 01
+36
+
+===== PAGE 37 =====
+Under review as a conference paper at ICLR 2026
+E.5 ADDITIONALANALYSIS FORSCALINGLAWS
+In this section, we provide the full, per-dataset results for our investigation into the impact of pre-training data
+scale on model performance. These granular results support the weighted average trends and conclusions
+presented in the main paper.
+Experimental SetupTo investigate the effect of pre-training data scale, we trained our model on increas-
+ingly larger subsets of our synthetic dataset: 350M, 700M, and the full 2.5B data points. Each model was
+trained using an identical protocol to isolate the effect of the data volume. Due to the predominantly uni-
+variate nature of the large-scale datasets used to construct our synthetic curriculum, this scaling analysis was
+conducted exclusively on the nine univariate benchmark datasets.
+Detailed Results and AnalysisThe results, presented in Table 12, confirm the existence of a strong and
+positive scaling law. As the volume of pre-training data increases, the model’s overall performance con-
+sistently improves. This is most evident in the ”Total 1st” place rankings, where the full2.5Bmodel
+overwhelmingly outperforms the smaller models across all four metrics, securing the top rank in 24 out
+of 36 total evaluations. While the general trend is clear, the per-dataset results reveal some interesting nu-
+ances. The scaling is not perfectly monotonic for every dataset-metric combination. For instance, the700M
+model achieves the best ’F1-T score on the IOPS and Y AHOO datasets, and the350Mmodel shows strong
+performance on the NEK dataset. These variations likely stem from a combination of dataset-specific char-
+acteristics and the inherent stochasticity of the training process. However, the dominant performance of the
+2.5B model in the aggregate rankings strongly validates our approach of leveraging a large-scale pre-training
+curriculum. It also suggests that the model’s capabilities are not yet saturated, with the potential for further
+improvement with even more data.
+Table 12: Performance comparison across different models and metrics. Best results for each dataset-metric
+combination are highlighted inred, and second-best are in blue .
+Metric Model Datasets Total Total
+IOPS MGAB NAB NEK Power SED TODS UCR YAHOO 1st 2nd
+Affiliation-F
+2.5B 84.7970.6979.7079.7368.30 96.87 85.91 84.63 96.65 06 01
+700M 86.46 68.87 86.4372.7473.0292.07 83.95 82.23 93.74 02 05
+350M 88.2468.19 86.21 79.27 63.30 89.21 83.22 82.49 92.35 01 03
+F1 T
+2.5B 27.7001.81 42.9035.8720.17 69.43 65.89 34.3085.86 06 00
+700M 40.5601.49 27.82 42.31 05.13 59.02 64.07 28.8886.88 02 05
+350M 36.08 01.08 25.6955.0606.23 53.92 58.76 31.59 85.99 01 04
+Standard-F1
+2.5B 20.5101.62 32.4633.05 15.59 69.88 67.01 28.13 87.02 06 01
+350M 30.6301.13 30.1250.89 17.3954.18 61.66 24.38 82.16 03 01
+700M 30.08 01.51 32.17 42.68 12.63 59.31 66.45 22.71 83.92 00 07
+VUS-PR
+2.5B 15.7101.0529.02 27.8809.88 80.75 93.46 23.09 84.41 06 01
+700M 26.510.7200 30.1836.27 08.51 67.37 91.62 18.35 78.48 02 05
+350M 24.07 0.7000 27.1648.6609.66 61.63 88.62 20.59 74.68 01 03
+E.5.1 ADDITIONALANALYSIS FORABLATIONSTUDY
+Ablation Study of Anomaly/Reconstrution HeadTo analyze the contribution of our model’s key com-
+ponents, we conducted an ablation study on the representative UCR dataset. We compare three distinct
+versions: (1) theFull Model, which includes both our dedicated anomaly head and the auxiliary reconstruc-
+tion head; (2)Anomaly Head Only, where the reconstruction task is removed; and (3)Reconstruction
+Only, where scores are derived from reconstruction error. The results, presented in Table 13, reveal the criti-
+cal synergy between our model’s two heads. The Full Model substantially outperforms both ablated versions
+37
+
+===== PAGE 38 =====
+Under review as a conference paper at ICLR 2026
+across all metrics. Interestingly, the Anomaly Head Only model sees a near-total collapse in performance,
+performing significantly worse than even the Reconstruction Only model. This result strongly suggests that
+the auxiliary reconstruction task is not merely helpful, but essential. It provides a foundational learning sig-
+nal that teaches the model to understand the basic structure of the time series, without which the dedicated
+anomaly head cannot function effectively. Therefore, our architecture’s state-of-the-art performance stems
+directly from the combination of these two components: the reconstruction head learns the representation,
+and the anomaly head refines it to achieve superior detection capabilities.
+Table 13: Ablation study results on the UCR dataset. The synergy of the Full Model provides the best
+performance, while the reconstruction head proves essential for the anomaly head to function effectively.
+Model Version Affiliation-F F1 T Standard-F1 VUS-PR
+Full Model 0.846 0.343 0.281 0.231
+Anomaly Head Only 0.709 0.043 0.024 0.014
+Reconstruction Only 0.742 0.109 0.075 0.044
+38

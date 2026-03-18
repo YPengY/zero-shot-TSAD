@@ -59,6 +59,27 @@ Optional overrides:
 ```
 
 `num_series` is sampled at the beginning of each sample. Use `--num-series` to force a fixed value (`min=max`).
+Raw `.npz` outputs are written without compression by default so the subsequent shard pack only compresses once. Use `--compress-output` to restore compressed per-sample raw files when disk space matters more than generation speed.
+
+Direct packed generation (skip raw `sample_*.npz/json` files):
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\generate_dataset.py --config .\configs\default.json --output .\outputs_packed --direct-pack --split train --samples-per-shard 512
+```
+
+In workbench-driven direct-pack runs, `dataset_meta.json` is regenerated automatically from split manifests after all splits finish.
+
+Direct window-packed generation (skip raw files and sample-packed intermediate shards):
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\generate_dataset.py --config .\configs\default.json --output .\outputs_window_direct --direct-window-pack --split train --window-context-size 512 --window-patch-size 16 --window-stride 512 --window-windows-per-shard 4096
+```
+
+Convert sample-packed shards to window-packed training shards (minimal fields + debug sidecar):
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\pack_dataset.py --input .\outputs_packed --output .\outputs_window_packed --window-level --context-size 1024 --patch-size 16 --stride 256 --windows-per-shard 4096 --overwrite
+```
 
 Debug switches (temporary disable by CLI):
 

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
+
 from .interfaces import LocalTypeSpec, SeasonalTypeSpec
 from .utils import (
     IntRange,
@@ -76,6 +78,8 @@ class AnomalyPlacementConfig:
 @dataclass(frozen=True)
 class LocalAnomalyFamilyConfig:
     events_per_sample: IntRange
+    scale_events_by_sequence_length: bool
+    sequence_length_reference: int
     window_length: IntRange
     endogenous_p: float
     target_component: str
@@ -88,6 +92,8 @@ class LocalAnomalyFamilyConfig:
 class SeasonalAnomalyFamilyConfig:
     activation_p: float
     events_per_sample: IntRange
+    scale_events_by_sequence_length: bool
+    sequence_length_reference: int
     window_length: IntRange
     endogenous_p: float
     target_component: str
@@ -114,10 +120,44 @@ class DebugConfig:
 
 
 @dataclass(frozen=True)
+class SequenceLengthConfig:
+    min: int
+    max: int
+    distribution: str = "uniform"
+    decay_scale: float | None = None
+
+    def sample(self, rng: np.random.Generator) -> int:
+        if self.max < self.min:
+            raise ValueError(
+                "`sequence_length.max` must be >= `sequence_length.min`, "
+                f"got {self.max} < {self.min}."
+            )
+        if self.min == self.max:
+            return self.min
+        if self.distribution == "uniform":
+            return int(rng.integers(self.min, self.max + 1))
+        if self.distribution == "truncated_exponential":
+            if self.decay_scale is None or self.decay_scale <= 0.0:
+                raise ValueError(
+                    "`sequence_length.decay_scale` must be positive when "
+                    "`sequence_length.distribution=truncated_exponential`."
+                )
+            support = float(self.max - self.min + 1)
+            tail_mass = 1.0 - float(np.exp(-support / self.decay_scale))
+            sampled = -self.decay_scale * float(np.log1p(-rng.random() * tail_mass))
+            offset = max(0, min(int(sampled), int(support) - 1))
+            return int(self.min + offset)
+        raise ValueError(
+            "Unsupported `sequence_length.distribution`. "
+            f"Expected one of ['uniform', 'truncated_exponential'], got {self.distribution!r}."
+        )
+
+
+@dataclass(frozen=True)
 class GeneratorConfig:
     raw: dict[str, Any]
     num_samples: int
-    sequence_length: IntRange
+    sequence_length: SequenceLengthConfig
     anomaly_sample_ratio: float
     num_series: IntRange
     seed: int | None
@@ -196,6 +236,8 @@ ROOT_CONFIG_KEYS: set[str] = {
     "anomaly",
     "debug",
 }
+SEQUENCE_LENGTH_KEYS: set[str] = {"min", "max", "distribution", "decay_scale"}
+SEQUENCE_LENGTH_DISTRIBUTIONS: set[str] = {"uniform", "truncated_exponential"}
 WEIGHTS_KEYS: set[str] = {"seasonality_type", "trend_type", "frequency_regime", "noise_level"}
 STAGE1_KEYS: set[str] = {"trend", "seasonality", "noise"}
 TREND_KEYS: set[str] = {"change_points", "slope_scale", "arima_noise_scale", "arima"}
@@ -229,7 +271,11 @@ ANOMALY_PLACEMENT_KEYS: set[str] = {
     "min_gap",
     "max_events_per_1000_steps_per_node",
 }
-ANOMALY_BUDGET_KEYS: set[str] = {"events_per_sample"}
+ANOMALY_BUDGET_KEYS: set[str] = {
+    "events_per_sample",
+    "scale_events_by_sequence_length",
+    "sequence_length_reference",
+}
 LOCAL_ANOMALY_KEYS: set[str] = {"budget", "defaults", "type_weights", "per_type"}
 SEASONAL_ANOMALY_KEYS: set[str] = {"activation_p", "budget", "defaults", "type_weights", "per_type"}
 LOCAL_DEFAULT_KEYS: set[str] = {"window_length", "endogenous_p", "target_component", "node_policy"}
@@ -583,7 +629,11 @@ def _default_anomaly_config() -> dict[str, Any]:
             "max_events_per_1000_steps_per_node": 2.0,
         },
         "local": {
-            "budget": {"events_per_sample": {"min": 1, "max": 3}},
+            "budget": {
+                "events_per_sample": {"min": 1, "max": 3},
+                "scale_events_by_sequence_length": False,
+                "sequence_length_reference": 1024,
+            },
             "defaults": {
                 "window_length": {"min": 8, "max": 80},
                 "endogenous_p": 0.5,
@@ -595,7 +645,11 @@ def _default_anomaly_config() -> dict[str, Any]:
         },
         "seasonal": {
             "activation_p": 0.4,
-            "budget": {"events_per_sample": {"min": 1, "max": 2}},
+            "budget": {
+                "events_per_sample": {"min": 1, "max": 2},
+                "scale_events_by_sequence_length": False,
+                "sequence_length_reference": 1024,
+            },
             "defaults": {
                 "window_length": {"min": 8, "max": 80},
                 "endogenous_p": 0.25,
@@ -610,7 +664,11 @@ def _default_anomaly_config() -> dict[str, Any]:
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "num_samples": 100,
-    "sequence_length": {"min": 100, "max": 1000},
+    "sequence_length": {
+        "min": 100,
+        "max": 1000,
+        "distribution": "uniform",
+    },
     "anomaly_sample_ratio": 0.7,
     "num_series": {"min": 6, "max": 6},
     "seed": 42,
@@ -781,6 +839,37 @@ def _normalize_node_policy(raw: Any, name: str, allowed_modes: set[str]) -> dict
     else:
         cleaned_nodes = None
     return {"mode": mode, "allowed_nodes": cleaned_nodes}
+
+
+def _normalize_sequence_length(raw: Any) -> SequenceLengthConfig:
+    sequence_raw = _ensure_allowed_keys(raw, "sequence_length", SEQUENCE_LENGTH_KEYS)
+    bounds = ensure_int_range(sequence_raw, "sequence_length", min_value=1)
+    distribution = str(sequence_raw.get("distribution", "uniform"))
+    if distribution not in SEQUENCE_LENGTH_DISTRIBUTIONS:
+        raise ValueError(
+            "`sequence_length.distribution` must be one of "
+            f"{sorted(SEQUENCE_LENGTH_DISTRIBUTIONS)}, got {distribution!r}."
+        )
+
+    decay_scale_raw = sequence_raw.get("decay_scale")
+    decay_scale = None
+    if decay_scale_raw is not None:
+        decay_scale = float(decay_scale_raw)
+        if decay_scale <= 0.0:
+            raise ValueError(
+                "`sequence_length.decay_scale` must be positive when provided, "
+                f"got {decay_scale}."
+            )
+    if distribution == "truncated_exponential" and decay_scale is None:
+        support = max(1, bounds.max - bounds.min + 1)
+        decay_scale = max(1.0, float(support) / 4.0)
+
+    return SequenceLengthConfig(
+        min=bounds.min,
+        max=bounds.max,
+        distribution=distribution,
+        decay_scale=decay_scale,
+    )
 
 
 def _normalize_type_specs(
@@ -1094,6 +1183,13 @@ def _build_config(raw: dict[str, Any]) -> GeneratorConfig:
             local_raw["budget"]["events_per_sample"],
             "anomaly.local.budget.events_per_sample",
         ),
+        scale_events_by_sequence_length=bool(
+            local_raw["budget"].get("scale_events_by_sequence_length", False)
+        ),
+        sequence_length_reference=ensure_positive_int(
+            local_raw["budget"].get("sequence_length_reference", 1024),
+            "anomaly.local.budget.sequence_length_reference",
+        ),
         window_length=ensure_int_range(
             local_raw["defaults"]["window_length"],
             "anomaly.local.defaults.window_length",
@@ -1137,6 +1233,13 @@ def _build_config(raw: dict[str, Any]) -> GeneratorConfig:
         events_per_sample=ensure_int_range(
             seasonal_raw["budget"]["events_per_sample"],
             "anomaly.seasonal.budget.events_per_sample",
+        ),
+        scale_events_by_sequence_length=bool(
+            seasonal_raw["budget"].get("scale_events_by_sequence_length", False)
+        ),
+        sequence_length_reference=ensure_positive_int(
+            seasonal_raw["budget"].get("sequence_length_reference", 1024),
+            "anomaly.seasonal.budget.sequence_length_reference",
         ),
         window_length=ensure_int_range(
             seasonal_raw["defaults"]["window_length"],
@@ -1189,7 +1292,7 @@ def _build_config(raw: dict[str, Any]) -> GeneratorConfig:
     return GeneratorConfig(
         raw=raw,
         num_samples=ensure_positive_int(raw["num_samples"], "num_samples"),
-        sequence_length=ensure_int_range(raw["sequence_length"], "sequence_length"),
+        sequence_length=_normalize_sequence_length(raw["sequence_length"]),
         anomaly_sample_ratio=ensure_probability(
             raw["anomaly_sample_ratio"], "anomaly_sample_ratio"
         ),

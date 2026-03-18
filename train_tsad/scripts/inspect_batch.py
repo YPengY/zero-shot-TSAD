@@ -20,11 +20,31 @@ from train_tsad.data import (  # noqa: E402
     ShardedSyntheticTsadDataset,
     SlidingContextWindowizer,
     SyntheticTsadDataset,
+    WindowShardedTsadDataset,
 )
 
 
 def _resolve_path(path: Path, *, base_dir: Path) -> Path:
     return path if path.is_absolute() else (base_dir / path).resolve()
+
+
+def _manifest_is_window_packed(manifest_path: Path | None) -> bool:
+    if manifest_path is None or not manifest_path.exists():
+        return False
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        row_text = line.strip()
+        if not row_text:
+            continue
+        row = json.loads(row_text)
+        return (
+            isinstance(row, dict)
+            and "shard_npz_path" in row
+            and ("window_index" in row or "sample_index" in row)
+            and "context_start" in row
+            and "context_end" in row
+            and "valid_length" in row
+        )
+    return False
 
 
 def _build_raw_dataset(config: ExperimentConfig, *, split: str):
@@ -33,11 +53,29 @@ def _build_raw_dataset(config: ExperimentConfig, *, split: str):
     manifest_path = _resolve_path(manifest_path, base_dir=PROJECT_ROOT)
     manifest_value: Path | None = manifest_path if manifest_path.exists() else None
 
-    dataset_cls = ShardedSyntheticTsadDataset if config.data.use_sharded_dataset else SyntheticTsadDataset
-    return dataset_cls(
+    if config.data.use_sharded_dataset:
+        if _manifest_is_window_packed(manifest_value):
+            return WindowShardedTsadDataset(
+                root_dir=dataset_root,
+                split=split,
+                manifest_path=manifest_value,
+                max_cached_shards=config.data.max_cached_shards,
+            )
+        return ShardedSyntheticTsadDataset(
+            root_dir=dataset_root,
+            split=split,
+            manifest_path=manifest_value,
+            max_cached_shards=config.data.max_cached_shards,
+            load_normal_series=config.data.load_normal_series,
+            load_metadata=config.data.load_metadata,
+        )
+
+    return SyntheticTsadDataset(
         root_dir=dataset_root,
         split=split,
         manifest_path=manifest_value,
+        load_normal_series=config.data.load_normal_series,
+        load_metadata=config.data.load_metadata,
     )
 
 
@@ -51,7 +89,7 @@ def _default_inspection_splits(config: ExperimentConfig) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_small.json"
+    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_pretrain_paper_aligned.json"
     parser = argparse.ArgumentParser(description="Inspect data quality before TSAD training.")
     parser.add_argument("--config", type=Path, default=default_config, help="Path to experiment config.")
     parser.add_argument(
@@ -114,6 +152,33 @@ def main() -> None:
             "Could not load any requested split for inspection. "
             f"Details={json.dumps(error_payload, ensure_ascii=False)}"
         )
+
+    if any(bool(getattr(dataset, "is_prewindowed", False)) for dataset in datasets_by_split.values()):
+        summary = {
+            "summary": {
+                "expected_training_split": config.data.split,
+                "inspected_splits": list(datasets_by_split.keys()),
+                "missing_splits": missing_splits,
+                "mode": "window_packed_overview",
+                "recommended_to_train": True,
+            },
+            "splits": {},
+        }
+        for split, dataset in datasets_by_split.items():
+            num_windows = int(len(dataset))
+            num_features = int(dataset.sample_num_features(0)) if num_windows > 0 else 0
+            summary["splits"][split] = {
+                "num_windows": num_windows,
+                "num_features": num_features,
+                "is_window_packed": True,
+            }
+        text = json.dumps(summary, indent=2, ensure_ascii=False)
+        if args.output is not None:
+            output_path = _resolve_path(args.output, base_dir=PROJECT_ROOT)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(text, encoding="utf-8")
+        print(text)
+        return
 
     windowizer = SlidingContextWindowizer(
         context_size=config.data.context_size,

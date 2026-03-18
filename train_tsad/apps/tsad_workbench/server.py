@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import shutil
 import subprocess
@@ -27,14 +28,26 @@ TRAIN_TSAD_ROOT = APP_ROOT.parents[1]
 PROJECT_ROOT = TRAIN_TSAD_ROOT.parent
 SYNTH_ROOT = PROJECT_ROOT / "synthetic_tsad"
 STUDIO_APP_ROOT = SYNTH_ROOT / "apps" / "tsad_studio"
+SYNTH_SRC_ROOT = SYNTH_ROOT / "src"
 
 if str(STUDIO_APP_ROOT) not in sys.path:
     sys.path.insert(0, str(STUDIO_APP_ROOT))
+if str(SYNTH_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SYNTH_SRC_ROOT))
 
 from studio_core import get_bootstrap_payload, import_config_text, preview_sample, randomize_config
+from synthtsad.io import (
+    pack_windows_from_packed_corpus,
+    write_dataset_meta_for_existing_packed_corpus,
+)
 
 PREVIEW_CACHE_LIMIT = 12
 JOB_LOG_LIMIT = 2500
+DEFAULT_FREE_SPACE_BUFFER_BYTES = 512 * 1024 * 1024
+DEFAULT_METADATA_BYTES_PER_SAMPLE = 24 * 1024
+DEFAULT_NPZ_OVERHEAD_BYTES_PER_SAMPLE = 8 * 1024
+DEFAULT_WORKBENCH_TRAIN_TEMPLATE = "timercd_small.json"
+WORKBENCH_GENERATION_METADATA_FILENAME = "workbench_generation_metadata.json"
 
 
 @dataclass(slots=True)
@@ -80,6 +93,103 @@ def _resolve_path_like(path_like: str) -> Path:
     else:
         raw_path = raw_path.resolve()
     return raw_path
+
+
+def _default_runs_root() -> Path:
+    preferred_root = Path("D:/TSAD")
+    if Path("D:/").exists():
+        return (preferred_root / "runs").resolve()
+    return (PROJECT_ROOT / "runs").resolve()
+
+
+def _nearest_existing_path(path: Path) -> Path:
+    candidate = path.resolve()
+    while not candidate.exists():
+        if candidate.parent == candidate:
+            return candidate
+        candidate = candidate.parent
+    return candidate
+
+
+def _format_bytes(num_bytes: int) -> str:
+    value = float(max(0, num_bytes))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024.0 or unit == "TB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.2f} {unit}"
+        value /= 1024.0
+    return f"{int(value)} B"
+
+
+def _range_upper_bound(raw_value: Any, *, default: int) -> int:
+    if isinstance(raw_value, dict):
+        if raw_value.get("max") is not None:
+            return max(1, int(raw_value["max"]))
+        if raw_value.get("min") is not None:
+            return max(1, int(raw_value["min"]))
+    if raw_value is None:
+        return max(1, int(default))
+    return max(1, int(raw_value))
+
+
+def _estimate_generation_required_bytes(
+    synthetic_config: dict[str, Any],
+    *,
+    split_counts: dict[str, int],
+    include_raw_stage: bool,
+) -> int:
+    sequence_length_max = _range_upper_bound(
+        synthetic_config.get("sequence_length"),
+        default=1024,
+    )
+    num_series_max = _range_upper_bound(
+        synthetic_config.get("num_series"),
+        default=1,
+    )
+    total_samples = sum(max(0, int(count)) for count in split_counts.values())
+    float_bytes = np.dtype(np.float64).itemsize
+    uint8_bytes = np.dtype(np.uint8).itemsize
+    bytes_per_timestep = (2 * float_bytes * num_series_max) + (uint8_bytes * num_series_max) + uint8_bytes
+    raw_array_bytes = total_samples * sequence_length_max * bytes_per_timestep
+    metadata_bytes = total_samples * DEFAULT_METADATA_BYTES_PER_SAMPLE
+    raw_npz_overhead = total_samples * DEFAULT_NPZ_OVERHEAD_BYTES_PER_SAMPLE
+    packed_stage_bytes = int(raw_array_bytes * 0.45)
+    if include_raw_stage:
+        return (
+            raw_array_bytes
+            + metadata_bytes
+            + raw_npz_overhead
+            + packed_stage_bytes
+            + DEFAULT_FREE_SPACE_BUFFER_BYTES
+        )
+    return packed_stage_bytes + metadata_bytes + DEFAULT_FREE_SPACE_BUFFER_BYTES
+
+
+def _validate_generation_target_space(
+    *,
+    run_root: Path,
+    synthetic_config: dict[str, Any],
+    split_counts: dict[str, int],
+    include_raw_stage: bool,
+) -> None:
+    target_base = _nearest_existing_path(run_root.parent)
+    free_bytes = shutil.disk_usage(target_base).free
+    required_bytes = _estimate_generation_required_bytes(
+        synthetic_config,
+        split_counts=split_counts,
+        include_raw_stage=include_raw_stage,
+    )
+    if free_bytes >= required_bytes:
+        return
+
+    raise OSError(
+        "Insufficient disk space for dataset generation. "
+        f"Target root: {run_root}. "
+        f"Available: {_format_bytes(free_bytes)}. "
+        f"Estimated required: {_format_bytes(required_bytes)}. "
+        "Use a run_root on a larger drive or reduce sample counts."
+    )
 
 
 def _job_to_dict(job: JobState) -> dict[str, Any]:
@@ -128,8 +238,15 @@ def _read_json_artifact(path: Path) -> Any | None:
         return None
 
 
-def _run_subprocess(cmd: list[str], *, cwd: Path, job: JobState) -> None:
-    _append_log(job, f"$ {' '.join(cmd)}")
+def _run_subprocess(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    job: JobState,
+    log_prefix: str | None = None,
+) -> None:
+    prefix = f"[{log_prefix}] " if log_prefix else ""
+    _append_log(job, f"{prefix}$ {' '.join(cmd)}")
     process = subprocess.Popen(
         cmd,
         cwd=str(cwd),
@@ -142,10 +259,49 @@ def _run_subprocess(cmd: list[str], *, cwd: Path, job: JobState) -> None:
     )
     assert process.stdout is not None
     for line in process.stdout:
-        _append_log(job, line)
+        text = line.rstrip()
+        if not text:
+            continue
+        _append_log(job, f"{prefix}{text}")
     rc = process.wait()
     if rc != 0:
-        raise RuntimeError(f"Command failed with exit code {rc}: {' '.join(cmd)}")
+        raise RuntimeError(f"{prefix}Command failed with exit code {rc}: {' '.join(cmd)}")
+
+
+def _run_parallel_split_generation(
+    split_commands: list[tuple[str, list[str]]],
+    *,
+    cwd: Path,
+    job: JobState,
+) -> None:
+    if not split_commands:
+        return
+
+    _append_log(job, f"Launching {len(split_commands)} split generation processes in parallel.")
+    failures: list[str] = []
+    max_workers = min(len(split_commands), 3)
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="wb-generate") as executor:
+        future_to_split = {
+            executor.submit(
+                _run_subprocess,
+                cmd,
+                cwd=cwd,
+                job=job,
+                log_prefix=f"split:{split}",
+            ): split
+            for split, cmd in split_commands
+        }
+        for future in as_completed(future_to_split):
+            split = future_to_split[future]
+            try:
+                future.result()
+            except Exception as exc:
+                failures.append(f"{split}: {exc}")
+            else:
+                _append_log(job, f"[split:{split}] generation completed.")
+
+    if failures:
+        raise RuntimeError("Split generation failed: " + "; ".join(failures))
 
 
 def _cache_preview(preview: dict[str, Any]) -> str:
@@ -195,27 +351,116 @@ def _iter_context_bounds(
     context_size: int,
     stride: int,
     include_tail: bool,
+    pad_short_sequences: bool = True,
 ) -> list[tuple[int, int]]:
-    _ = stride
-    _ = include_tail
+    if context_size <= 0:
+        raise ValueError("`context_size` must be positive.")
+    if stride <= 0:
+        raise ValueError("`stride` must be positive.")
     if sequence_length <= 0:
         return []
     if sequence_length < context_size:
-        return []
+        if not pad_short_sequences:
+            return []
+        return [(0, sequence_length)]
 
-    usable_length = (sequence_length // context_size) * context_size
-    return [(start, start + context_size) for start in range(0, usable_length, context_size)]
+    last_full_start = sequence_length - context_size
+    starts = list(range(0, last_full_start + 1, stride))
+    bounds = [(start, start + context_size) for start in starts]
+
+    last_covered_end = bounds[-1][1] if bounds else 0
+    if include_tail and last_covered_end < sequence_length:
+        tail_start = starts[-1] + stride if starts else 0
+        tail_start = min(tail_start, sequence_length - 1)
+        tail_end = sequence_length
+        if tail_start < tail_end:
+            bounds.append((tail_start, tail_end))
+    return bounds
+
+
+def _slice_or_pad_1d(
+    array: np.ndarray,
+    *,
+    start: int,
+    end: int,
+    target_length: int,
+    pad_value: float | int,
+    dtype: np.dtype[np.generic] | type[np.generic],
+) -> np.ndarray:
+    window = np.asarray(array[start:end], dtype=dtype)
+    if window.shape[0] > target_length:
+        raise ValueError("Window length cannot exceed target length.")
+    if window.shape[0] == target_length:
+        return np.ascontiguousarray(window)
+
+    padded = np.full((target_length,), pad_value, dtype=dtype)
+    padded[: window.shape[0]] = window
+    return padded
+
+
+def _build_patch_labels_1d(point_mask: np.ndarray, *, patch_size: int) -> np.ndarray:
+    if patch_size <= 0:
+        raise ValueError("`patch_size` must be positive.")
+    trimmed_length = point_mask.shape[0] - (point_mask.shape[0] % patch_size)
+    if trimmed_length <= 0:
+        return np.zeros((0,), dtype=np.uint8)
+
+    trimmed = np.asarray(point_mask[:trimmed_length], dtype=np.uint8)
+    return trimmed.reshape(trimmed_length // patch_size, patch_size).max(axis=1).astype(np.uint8, copy=False)
+
+
+def _describe_window(
+    *,
+    start: int,
+    end: int,
+    sequence_length: int,
+    context_size: int,
+    patch_size: int,
+) -> dict[str, int | bool]:
+    effective_length = end - start
+    padded_steps = max(0, context_size - effective_length)
+    trimmed_length = context_size - (context_size % patch_size) if patch_size > 0 else 0
+    total_patch_count = trimmed_length // patch_size if patch_size > 0 else 0
+    valid_patch_count = min(effective_length, trimmed_length) // patch_size if patch_size > 0 else 0
+    is_short_window = sequence_length < context_size
+    is_tail_window = (
+        sequence_length >= context_size
+        and effective_length < context_size
+        and end == sequence_length
+    )
+    return {
+        "effective_length": int(effective_length),
+        "padded_steps": int(padded_steps),
+        "valid_patch_count": int(valid_patch_count),
+        "total_patch_count": int(total_patch_count),
+        "is_short_window": bool(is_short_window),
+        "is_tail_window": bool(is_tail_window),
+    }
+
+
+def _build_padding_mask(*, effective_length: int, context_size: int) -> np.ndarray:
+    padding_mask = np.zeros((context_size,), dtype=np.uint8)
+    if effective_length < context_size:
+        padding_mask[effective_length:] = 1
+    return padding_mask
 
 
 def _resolve_packed_root(path_like: str) -> Path:
     raw_path = _resolve_path_like(path_like)
+    if (
+        (raw_path / "dataset_meta.json").exists()
+        and (raw_path / "manifest.train.jsonl").exists()
+    ):
+        return raw_path
     if (raw_path / "manifest.train.jsonl").exists():
         return raw_path
     if (raw_path / "data_packed" / "manifest.train.jsonl").exists():
         return raw_path / "data_packed"
+    if (raw_path / "data_packed_windows" / "manifest.train.jsonl").exists():
+        return raw_path / "data_packed_windows"
     raise FileNotFoundError(
         "Could not locate packed dataset root. Expected manifest.train.jsonl in "
-        f"`{raw_path}` or `{raw_path / 'data_packed'}`."
+        f"`{raw_path}` or `{raw_path / 'data_packed'}` or `{raw_path / 'data_packed_windows'}`."
     )
 
 
@@ -223,17 +468,159 @@ def _resolve_run_root(path_like: str) -> Path:
     raw_path = _resolve_path_like(path_like)
     if (raw_path / "data_packed" / "manifest.train.jsonl").exists():
         return raw_path
+    if (raw_path / "data_packed_windows" / "manifest.train.jsonl").exists():
+        return raw_path
     if (raw_path / "manifest.train.jsonl").exists() and raw_path.name == "data_packed":
+        return raw_path.parent
+    if (raw_path / "manifest.train.jsonl").exists() and raw_path.name == "data_packed_windows":
         return raw_path.parent
     if (raw_path / "manifest.train.jsonl").exists():
         return raw_path
     raise FileNotFoundError(
-        "Could not locate run root. Expected a run directory with `data_packed/` or a packed dataset root."
+        "Could not locate run root. Expected a run directory with `data_packed/` or "
+        "`data_packed_windows/`, or a packed dataset root."
     )
 
 
 def _count_manifest_rows(manifest_path: Path) -> int:
     return sum(1 for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def _load_json_mapping(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _is_training_config_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    data_section = payload.get("data")
+    train_section = payload.get("train")
+    if not isinstance(data_section, dict) or not isinstance(train_section, dict):
+        return False
+    dataset_root = data_section.get("dataset_root")
+    output_dir = train_section.get("output_dir")
+    return (
+        isinstance(dataset_root, str)
+        and bool(dataset_root.strip())
+        and isinstance(output_dir, str)
+        and bool(output_dir.strip())
+    )
+
+
+def _iter_training_config_candidates(config_dir: Path) -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for name in ("train_generated.json", "train_mini.json", "train.json", "train_config.json"):
+        path = config_dir / name
+        if not path.exists():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        candidates.append(path)
+
+    if config_dir.exists():
+        for path in sorted(config_dir.glob("*.json")):
+            if not path.exists():
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(path)
+    return candidates
+
+
+def _find_training_config_path(config_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
+    for path in _iter_training_config_candidates(config_dir):
+        payload = _load_json_mapping(path)
+        if _is_training_config_payload(payload):
+            return path, payload
+    return None, None
+
+
+def _load_workbench_generation_metadata(config_dir: Path) -> dict[str, Any]:
+    payload = _load_json_mapping(config_dir / WORKBENCH_GENERATION_METADATA_FILENAME)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_workbench_train_config(
+    *,
+    packed_root: Path,
+    train_output_dir: Path,
+    metadata: dict[str, Any] | None = None,
+    allow_template_fallback: bool = True,
+) -> dict[str, Any]:
+    effective_metadata = dict(metadata or {})
+    template_name = (
+        str(effective_metadata.get("train_template") or DEFAULT_WORKBENCH_TRAIN_TEMPLATE).strip()
+        or DEFAULT_WORKBENCH_TRAIN_TEMPLATE
+    )
+    template_path = TRAIN_TSAD_ROOT / "configs" / template_name
+    if not template_path.exists() and allow_template_fallback and template_name != DEFAULT_WORKBENCH_TRAIN_TEMPLATE:
+        template_name = DEFAULT_WORKBENCH_TRAIN_TEMPLATE
+        template_path = TRAIN_TSAD_ROOT / "configs" / template_name
+    if not template_path.exists():
+        raise FileNotFoundError(f"Missing training template: {template_path}")
+
+    train_config = _load_json_mapping(template_path)
+    if not _is_training_config_payload(train_config):
+        raise ValueError(f"Training template is not a valid training config: {template_path}")
+
+    train_config["data"]["dataset_root"] = str(packed_root)
+    train_config["train"]["output_dir"] = str(train_output_dir)
+    if effective_metadata.get("train_device"):
+        train_config["train"]["device"] = str(effective_metadata["train_device"])
+    if effective_metadata.get("train_max_epochs") is not None:
+        train_config["train"]["max_epochs"] = int(effective_metadata["train_max_epochs"])
+    if effective_metadata.get("train_batch_size") is not None:
+        train_config["data"]["batch_size"] = int(effective_metadata["train_batch_size"])
+    if effective_metadata.get("eval_batch_size") is not None:
+        train_config["data"]["eval_batch_size"] = int(effective_metadata["eval_batch_size"])
+    return train_config
+
+
+def _ensure_train_config_for_run(run_root: Path) -> tuple[Path, dict[str, Any], bool]:
+    resolved_run_root = _resolve_run_root(str(run_root))
+    packed_root = _resolve_packed_root(str(resolved_run_root))
+    config_dir = resolved_run_root / "configs"
+    train_output_dir = resolved_run_root / "train_out"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    train_output_dir.mkdir(parents=True, exist_ok=True)
+
+    train_config_path, train_config = _find_training_config_path(config_dir)
+    if train_config_path is not None and train_config is not None:
+        return train_config_path, train_config, False
+
+    train_config = _build_workbench_train_config(
+        packed_root=packed_root,
+        train_output_dir=train_output_dir,
+        metadata=_load_workbench_generation_metadata(config_dir),
+        allow_template_fallback=True,
+    )
+    train_config_path = config_dir / "train_generated.json"
+    train_config_path.write_text(json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    return train_config_path, train_config, True
+
+
+def _infer_run_root_from_config_path(config_path: Path) -> Path | None:
+    config_dir = config_path.parent
+    if config_dir.name != "configs":
+        return None
+    run_root = config_dir.parent
+    if (
+        (run_root / "data_packed" / "manifest.train.jsonl").exists()
+        or (run_root / "data_packed_windows" / "manifest.train.jsonl").exists()
+    ):
+        return run_root
+    return None
 
 
 def _load_manifest_rows(packed_root: Path, split: str) -> list[dict[str, Any]]:
@@ -248,6 +635,8 @@ def _load_manifest_rows(packed_root: Path, split: str) -> list[dict[str, Any]]:
 
 
 def _load_shard_metadata(shard_jsonl_path: Path) -> list[dict[str, Any]]:
+    if not shard_jsonl_path.exists():
+        return []
     rows: list[dict[str, Any]] = []
     for line in shard_jsonl_path.read_text(encoding="utf-8").splitlines():
         if line.strip():
@@ -257,29 +646,69 @@ def _load_shard_metadata(shard_jsonl_path: Path) -> list[dict[str, Any]]:
 
 def _load_sample_from_manifest_row(*, packed_root: Path, row: dict[str, Any]) -> dict[str, Any]:
     shard_npz_path = packed_root / str(row["shard_npz_path"])
-    shard_jsonl_path = packed_root / str(row["shard_jsonl_path"])
-    sample_index = int(row["sample_index"])
+    shard_jsonl_path_raw = row.get("shard_jsonl_path")
+    debug_jsonl_path_raw = row.get("debug_jsonl_path")
+    sample_index = int(row.get("sample_index", row.get("window_index", 0)))
 
     with np.load(shard_npz_path, allow_pickle=False) as npz:
-        lengths = np.asarray(npz["lengths"], dtype=np.int32)
-        num_series = np.asarray(npz["num_series"], dtype=np.int32)
-        series_offsets = np.asarray(npz["series_offsets"], dtype=np.int64)
-        time_offsets = np.asarray(npz["time_offsets"], dtype=np.int64)
+        if "series_windows" in npz.files:
+            series = np.asarray(npz["series_windows"][sample_index], dtype=np.float32)
+            point_mask = np.asarray(npz["point_mask_windows"][sample_index], dtype=np.uint8)
+            valid_lengths = np.asarray(npz["valid_lengths"], dtype=np.int32)
+            if series.ndim != 2:
+                raise ValueError(
+                    f"Window shard sample must be 2D [T, D], got shape {series.shape}."
+                )
+            length = int(series.shape[0])
+            dims = int(series.shape[1])
+            valid_length = int(valid_lengths[sample_index]) if sample_index < len(valid_lengths) else length
+            valid_length = max(0, min(valid_length, length))
 
-        length = int(lengths[sample_index])
-        dims = int(num_series[sample_index])
-        flat_start = int(series_offsets[sample_index])
-        flat_end = int(series_offsets[sample_index + 1])
-        time_start = int(time_offsets[sample_index])
-        time_end = int(time_offsets[sample_index + 1])
+            point_mask_any = np.zeros((length,), dtype=np.uint8)
+            if valid_length > 0:
+                point_mask_any[:valid_length] = (
+                    point_mask[:valid_length].sum(axis=1) > 0
+                ).astype(np.uint8, copy=False)
+            if valid_length < length:
+                point_mask[valid_length:] = 0
+            normal_series = np.zeros_like(series, dtype=np.float32)
+        else:
+            lengths = np.asarray(npz["lengths"], dtype=np.int32)
+            num_series = np.asarray(npz["num_series"], dtype=np.int32)
+            series_offsets = np.asarray(npz["series_offsets"], dtype=np.int64)
+            time_offsets = np.asarray(npz["time_offsets"], dtype=np.int64)
 
-        series = np.asarray(npz["series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
-        normal_series = np.asarray(npz["normal_series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
-        point_mask = np.asarray(npz["point_mask_values"][flat_start:flat_end], dtype=np.uint8).reshape(length, dims)
-        point_mask_any = np.asarray(npz["point_mask_any_values"][time_start:time_end], dtype=np.uint8)
+            length = int(lengths[sample_index])
+            dims = int(num_series[sample_index])
+            flat_start = int(series_offsets[sample_index])
+            flat_end = int(series_offsets[sample_index + 1])
+            time_start = int(time_offsets[sample_index])
+            time_end = int(time_offsets[sample_index + 1])
 
-    metadata_rows = _load_shard_metadata(shard_jsonl_path)
-    metadata = metadata_rows[sample_index] if sample_index < len(metadata_rows) else {}
+            series = np.asarray(npz["series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
+            normal_series = np.asarray(npz["normal_series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
+            point_mask = np.asarray(npz["point_mask_values"][flat_start:flat_end], dtype=np.uint8).reshape(length, dims)
+            point_mask_any = np.asarray(npz["point_mask_any_values"][time_start:time_end], dtype=np.uint8)
+
+    metadata: dict[str, Any] = {}
+    if debug_jsonl_path_raw is not None:
+        debug_rows = _load_shard_metadata(packed_root / str(debug_jsonl_path_raw))
+        debug_row_index = int(row.get("debug_row_index", sample_index))
+        if 0 <= debug_row_index < len(debug_rows):
+            debug_row = debug_rows[debug_row_index]
+            if isinstance(debug_row, dict):
+                source_metadata = debug_row.get("source_metadata")
+                if isinstance(source_metadata, dict):
+                    metadata = source_metadata
+                else:
+                    metadata = debug_row
+    elif shard_jsonl_path_raw is not None:
+        metadata_rows = _load_shard_metadata(packed_root / str(shard_jsonl_path_raw))
+        if sample_index < len(metadata_rows):
+            maybe_metadata = metadata_rows[sample_index]
+            if isinstance(maybe_metadata, dict):
+                metadata = maybe_metadata
+
     return {
         "length": length,
         "num_series": dims,
@@ -303,25 +732,17 @@ def _build_run_info(path_like: str) -> dict[str, Any]:
             split_counts[split] = _count_manifest_rows(manifest_path)
 
     config_dir = run_root / "configs"
-    config_candidates = [
-        config_dir / "train_generated.json",
-        config_dir / "train_mini.json",
-        config_dir / "train.json",
-        config_dir / "train_config.json",
-    ]
-    if config_dir.exists():
-        config_candidates.extend(sorted(config_dir.glob("*.json")))
-
-    train_config_path = next((path for path in config_candidates if path.exists()), None)
     train_output_dir = run_root / "train_out"
-    if train_config_path is not None:
-        try:
-            config_payload = json.loads(train_config_path.read_text(encoding="utf-8"))
-            output_dir = config_payload.get("train", {}).get("output_dir")
-            if output_dir:
-                train_output_dir = _resolve_path_like(str(output_dir))
-        except Exception:
-            pass
+    train_config_path: Path | None = None
+    config_payload: dict[str, Any] | None = None
+    try:
+        train_config_path, config_payload, _ = _ensure_train_config_for_run(run_root)
+    except Exception:
+        train_config_path, config_payload = _find_training_config_path(config_dir)
+    if config_payload is not None:
+        output_dir = config_payload.get("train", {}).get("output_dir")
+        if output_dir:
+            train_output_dir = _resolve_path_like(str(output_dir))
 
     return {
         "run_root": str(run_root),
@@ -353,7 +774,7 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
 
     run_name = str(payload.get("run_name", f"workbench_run_{timestamp}")).strip() or f"workbench_run_{timestamp}"
     run_root_input = str(payload.get("run_root", "")).strip()
-    run_root = _resolve_path_like(run_root_input) if run_root_input else (PROJECT_ROOT / "runs" / run_name)
+    run_root = _resolve_path_like(run_root_input) if run_root_input else (_default_runs_root() / run_name).resolve()
 
     overwrite = bool(payload.get("overwrite_run", False))
     confirm_overwrite = bool(payload.get("confirm_overwrite", False))
@@ -366,14 +787,44 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
     elif run_root.exists() and not overwrite:
         raise FileExistsError(f"Run root already exists: {run_root}")
 
+    direct_pack = bool(payload.get("direct_pack", True))
+    window_pack = bool(payload.get("window_pack", False))
+    direct_window_pack = bool(payload.get("direct_window_pack", True)) and direct_pack and window_pack
     raw_root = run_root / "data_raw"
     packed_root = run_root / "data_packed"
+    window_packed_root = run_root / "data_packed_windows"
     config_root = run_root / "configs"
     train_out = run_root / "train_out"
     eval_out = run_root / "eval"
 
-    for split in ("train", "val", "test"):
-        (raw_root / split).mkdir(parents=True, exist_ok=True)
+    window_context_size = int(payload.get("window_context_size", 1024))
+    window_patch_size = int(payload.get("window_patch_size", 16))
+    window_stride = payload.get("window_stride")
+    window_windows_per_shard = int(payload.get("window_windows_per_shard", 4096))
+    window_include_tail = bool(payload.get("window_include_tail", True))
+    window_pad_short_sequences = bool(payload.get("window_pad_short_sequences", True))
+    window_debug_sidecar = bool(payload.get("window_debug_sidecar", True))
+    window_train_min_patch_positive_ratio_raw = payload.get("window_train_min_patch_positive_ratio")
+    window_train_min_anomaly_point_ratio_raw = payload.get("window_train_min_anomaly_point_ratio")
+    window_train_min_patch_positive_ratio = (
+        None
+        if window_train_min_patch_positive_ratio_raw is None
+        else float(window_train_min_patch_positive_ratio_raw)
+    )
+    window_train_min_anomaly_point_ratio = (
+        None
+        if window_train_min_anomaly_point_ratio_raw is None
+        else float(window_train_min_anomaly_point_ratio_raw)
+    )
+
+    if direct_window_pack:
+        window_packed_root.mkdir(parents=True, exist_ok=True)
+        packed_root.mkdir(parents=True, exist_ok=True)
+    elif direct_pack:
+        packed_root.mkdir(parents=True, exist_ok=True)
+    else:
+        for split in ("train", "val", "test"):
+            (raw_root / split).mkdir(parents=True, exist_ok=True)
     config_root.mkdir(parents=True, exist_ok=True)
     train_out.mkdir(parents=True, exist_ok=True)
     eval_out.mkdir(parents=True, exist_ok=True)
@@ -382,9 +833,31 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
     if not isinstance(synthetic_config, dict):
         raise ValueError("Generation requires the full edited synthetic config.")
 
+    train_template_name = (
+        str(payload.get("train_template", DEFAULT_WORKBENCH_TRAIN_TEMPLATE)).strip()
+        or DEFAULT_WORKBENCH_TRAIN_TEMPLATE
+    )
+    generation_metadata = {
+        "train_template": train_template_name,
+        "train_device": str(payload["train_device"]) if payload.get("train_device") else None,
+        "train_max_epochs": (
+            int(payload["train_max_epochs"]) if payload.get("train_max_epochs") is not None else None
+        ),
+        "train_batch_size": (
+            int(payload["train_batch_size"]) if payload.get("train_batch_size") is not None else None
+        ),
+        "eval_batch_size": (
+            int(payload["eval_batch_size"]) if payload.get("eval_batch_size") is not None else None
+        ),
+    }
     synthetic_config_path = config_root / "synthetic_runtime_config.json"
     synthetic_config_path.write_text(
         json.dumps(synthetic_config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    generation_metadata_path = config_root / WORKBENCH_GENERATION_METADATA_FILENAME
+    generation_metadata_path.write_text(
+        json.dumps(generation_metadata, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -393,9 +866,24 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
         "val": int(payload.get("val_samples", 1500)),
         "test": int(payload.get("test_samples", 1500)),
     }
+    _validate_generation_target_space(
+        run_root=run_root,
+        synthetic_config=synthetic_config,
+        split_counts=split_counts,
+        include_raw_stage=not direct_pack,
+    )
     seed_base = int(payload.get("seed_base", synthetic_config.get("seed", 0) or 0))
+    dataset_name = str(payload.get("dataset_name", "workbench_tsad"))
+    dataset_version = str(payload.get("dataset_version", "v1"))
+    samples_per_shard = int(payload.get("samples_per_shard", 128))
 
+    split_commands: list[tuple[str, list[str]]] = []
     for split_index, split in enumerate(("train", "val", "test"), start=1):
+        output_path = (
+            window_packed_root
+            if direct_window_pack
+            else (packed_root if direct_pack else (raw_root / split))
+        )
         cmd = [
             str(python_exe),
             "-B",
@@ -403,56 +891,183 @@ def _run_generation_job(payload: dict[str, Any], job: JobState) -> dict[str, Any
             "--config",
             str(synthetic_config_path),
             "--output",
-            str(raw_root / split),
+            str(output_path),
             "--num-samples",
             str(split_counts[split]),
             "--seed",
             str(seed_base + split_index),
         ]
-        _run_subprocess(cmd, cwd=PROJECT_ROOT, job=job)
+        if direct_window_pack:
+            split_min_patch_positive_ratio = (
+                window_train_min_patch_positive_ratio if split == "train" else None
+            )
+            split_min_anomaly_point_ratio = (
+                window_train_min_anomaly_point_ratio if split == "train" else None
+            )
+            cmd.extend(
+                [
+                    "--direct-window-pack",
+                    "--split",
+                    split,
+                    "--window-context-size",
+                    str(window_context_size),
+                    "--window-patch-size",
+                    str(window_patch_size),
+                    "--window-windows-per-shard",
+                    str(window_windows_per_shard),
+                ]
+            )
+            if split_min_patch_positive_ratio is not None:
+                cmd.extend(
+                    [
+                        "--window-min-patch-positive-ratio",
+                        str(float(split_min_patch_positive_ratio)),
+                    ]
+                )
+            if split_min_anomaly_point_ratio is not None:
+                cmd.extend(
+                    [
+                        "--window-min-anomaly-point-ratio",
+                        str(float(split_min_anomaly_point_ratio)),
+                    ]
+                )
+            if window_stride is not None:
+                cmd.extend(["--window-stride", str(int(window_stride))])
+            if not window_include_tail:
+                cmd.append("--window-no-include-tail")
+            if not window_pad_short_sequences:
+                cmd.append("--window-no-pad-short-sequences")
+            if not window_debug_sidecar:
+                cmd.append("--window-no-debug-sidecar")
+        elif direct_pack:
+            cmd.extend(
+                [
+                    "--direct-pack",
+                    "--split",
+                    split,
+                    "--samples-per-shard",
+                    str(samples_per_shard),
+                ]
+            )
+        split_commands.append((split, cmd))
 
-    pack_cmd = [
-        str(python_exe),
-        "-B",
-        str(SYNTH_ROOT / "scripts" / "pack_dataset.py"),
-        "--input",
-        str(raw_root),
-        "--output",
-        str(packed_root),
-        "--samples-per-shard",
-        str(int(payload.get("samples_per_shard", 128))),
-        "--overwrite",
-        "--dataset-name",
-        str(payload.get("dataset_name", "workbench_tsad")),
-        "--dataset-version",
-        str(payload.get("dataset_version", "v1")),
-    ]
-    _run_subprocess(pack_cmd, cwd=PROJECT_ROOT, job=job)
+    _run_parallel_split_generation(split_commands, cwd=PROJECT_ROOT, job=job)
+    if direct_window_pack:
+        _append_log(job, "All split generation processes finished in direct-window-pack mode.")
+        resolved_window_stride = window_context_size if window_stride is None else int(window_stride)
+        meta_report = write_dataset_meta_for_existing_packed_corpus(
+            window_packed_root,
+            dataset_name=dataset_name,
+            dataset_version=dataset_version,
+            samples_per_shard=window_windows_per_shard,
+            storage_format_type="npz_window_shards_minimal_v1",
+            storage_format_extras={
+                "context_size": int(window_context_size),
+                "patch_size": int(window_patch_size),
+                "stride": int(resolved_window_stride),
+                "include_tail": bool(window_include_tail),
+                "pad_short_sequences": bool(window_pad_short_sequences),
+                "windows_per_shard": int(window_windows_per_shard),
+                "debug_sidecar": bool(window_debug_sidecar),
+                "required_fields": [
+                    "series_windows",
+                    "point_mask_windows",
+                    "patch_labels_windows",
+                    "valid_lengths",
+                ],
+            },
+        )
+        _append_log(
+            job,
+            "Wrote dataset_meta.json for window-packed manifests "
+            f"(splits={list(meta_report.splits.keys())}).",
+        )
+        training_dataset_root = window_packed_root
+    elif direct_pack:
+        _append_log(job, "All split generation processes finished in direct-pack mode.")
+        meta_report = write_dataset_meta_for_existing_packed_corpus(
+            packed_root,
+            dataset_name=dataset_name,
+            dataset_version=dataset_version,
+            samples_per_shard=samples_per_shard,
+        )
+        _append_log(
+            job,
+            "Wrote dataset_meta.json from packed manifests "
+            f"(splits={list(meta_report.splits.keys())}).",
+        )
+        training_dataset_root = packed_root
+    else:
+        _append_log(job, "All split generation processes finished. Starting shard packing.")
+        pack_cmd = [
+            str(python_exe),
+            "-B",
+            str(SYNTH_ROOT / "scripts" / "pack_dataset.py"),
+            "--input",
+            str(raw_root),
+            "--output",
+            str(packed_root),
+            "--samples-per-shard",
+            str(samples_per_shard),
+            "--overwrite",
+            "--dataset-name",
+            dataset_name,
+            "--dataset-version",
+            dataset_version,
+        ]
+        _run_subprocess(pack_cmd, cwd=PROJECT_ROOT, job=job, log_prefix="pack")
+        training_dataset_root = packed_root
 
-    template_name = str(payload.get("train_template", "timercd_small.json"))
-    train_template_path = TRAIN_TSAD_ROOT / "configs" / template_name
-    if not train_template_path.exists():
-        raise FileNotFoundError(f"Missing training template: {train_template_path}")
-    train_config = json.loads(train_template_path.read_text(encoding="utf-8"))
+    if window_pack and not direct_window_pack:
+        _append_log(job, "Starting window-level packing pass for training format.")
+        window_report = pack_windows_from_packed_corpus(
+            input_root=packed_root,
+            output_root=window_packed_root,
+            context_size=window_context_size,
+            patch_size=window_patch_size,
+            stride=(None if window_stride is None else int(window_stride)),
+            include_tail=window_include_tail,
+            pad_short_sequences=window_pad_short_sequences,
+            windows_per_shard=window_windows_per_shard,
+            overwrite=True,
+            dataset_name=dataset_name,
+            dataset_version=dataset_version,
+            write_debug_sidecar=window_debug_sidecar,
+            min_patch_positive_ratio=window_train_min_patch_positive_ratio,
+            min_anomaly_point_ratio=window_train_min_anomaly_point_ratio,
+        )
+        _append_log(
+            job,
+            "Window-level packing finished: "
+            f"splits={list(window_report.splits.keys())}, "
+            f"total_windows={sum(report.num_samples for report in window_report.splits.values())}.",
+        )
+        training_dataset_root = window_packed_root
 
-    train_config["data"]["dataset_root"] = str(packed_root)
-    train_config["train"]["output_dir"] = str(train_out)
-    if payload.get("train_device"):
-        train_config["train"]["device"] = str(payload["train_device"])
-    if payload.get("train_max_epochs") is not None:
-        train_config["train"]["max_epochs"] = int(payload["train_max_epochs"])
-    if payload.get("train_batch_size") is not None:
-        train_config["data"]["batch_size"] = int(payload["train_batch_size"])
-    if payload.get("eval_batch_size") is not None:
-        train_config["data"]["eval_batch_size"] = int(payload["eval_batch_size"])
+    train_config = _build_workbench_train_config(
+        packed_root=training_dataset_root,
+        train_output_dir=train_out,
+        metadata=generation_metadata,
+        allow_template_fallback=False,
+    )
 
     train_config_path = config_root / "train_generated.json"
     train_config_path.write_text(json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     result = _build_run_info(str(run_root))
+    if direct_window_pack:
+        generation_mode = "direct_window_pack"
+    elif direct_pack:
+        generation_mode = "direct_pack+window_pack" if window_pack else "direct_pack"
+    else:
+        generation_mode = "raw_then_pack+window_pack" if window_pack else "raw_then_pack"
     result.update(
         {
-            "raw_root": str(raw_root),
+            "raw_root": str(raw_root) if raw_root.exists() else None,
+            "generation_mode": generation_mode,
+            "dataset_meta_path": str(training_dataset_root / "dataset_meta.json"),
+            "training_dataset_root": str(training_dataset_root),
+            "window_packed_root": str(window_packed_root) if window_pack else None,
             "synthetic_config_path": str(synthetic_config_path),
             "train_config_path": str(train_config_path),
             "eval_output_dir": str(eval_out),
@@ -465,13 +1080,45 @@ def _run_train_job(payload: dict[str, Any], job: JobState) -> dict[str, Any]:
     python_exe = _resolve_python_executable()
 
     config_path_raw = str(payload.get("config_path", "")).strip()
-    if not config_path_raw:
-        raise ValueError("config_path is required")
-    config_path = _resolve_path_like(config_path_raw)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Missing training config: {config_path}")
+    run_root_raw = str(payload.get("run_root", "")).strip()
 
-    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    config_path: Path | None = None
+    config_payload: dict[str, Any] | None = None
+    if config_path_raw:
+        config_path = _resolve_path_like(config_path_raw)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Missing training config: {config_path}")
+        config_payload = _load_json_mapping(config_path)
+        if not _is_training_config_payload(config_payload):
+            inferred_run_root = _infer_run_root_from_config_path(config_path)
+            if inferred_run_root is None and run_root_raw:
+                inferred_run_root = _resolve_run_root(run_root_raw)
+            if inferred_run_root is None:
+                raise ValueError(
+                    "Provided config_path is not a valid training config. "
+                    "Expected a JSON file with `data` and `train` sections."
+                )
+            resolved_config_path, resolved_config_payload, repaired = _ensure_train_config_for_run(
+                inferred_run_root
+            )
+            if repaired or resolved_config_path != config_path:
+                _append_log(
+                    job,
+                    "Resolved training config automatically: "
+                    f"{config_path} -> {resolved_config_path}",
+                )
+            config_path = resolved_config_path
+            config_payload = resolved_config_payload
+    elif run_root_raw:
+        config_path, config_payload, repaired = _ensure_train_config_for_run(_resolve_run_root(run_root_raw))
+        if repaired:
+            _append_log(job, f"Rebuilt missing training config at {config_path}.")
+    else:
+        raise ValueError("config_path or run_root is required")
+
+    if config_path is None or not _is_training_config_payload(config_payload):
+        raise ValueError(f"Training config is invalid: {config_path}")
+
     output_dir = config_payload.get("train", {}).get("output_dir")
     output_dir_str = str(_resolve_path_like(str(output_dir))) if output_dir else None
     if output_dir_str:
@@ -591,15 +1238,30 @@ def _group_metric_names(metric_names: list[str]) -> dict[str, list[str]]:
     }
     for name in metric_names:
         _, key = name.split(".", 1)
-        if key.startswith("num_") or key in {"tp", "fp", "fn", "anomaly_weight", "reconstruction_weight"}:
+        if key.startswith("num_") or key in {
+            "tp",
+            "fp",
+            "fn",
+            "anomaly_weight",
+            "point_anomaly_weight",
+            "reconstruction_weight",
+        }:
             continue
         if "loss" in key:
             groups["loss"].append(name)
             continue
-        if key in {"precision", "recall", "f1", "pr_auc", "patch_accuracy"}:
+        if key in {"precision", "recall", "f1", "pr_auc", "patch_accuracy", "point_accuracy"}:
             groups["quality"].append(name)
             continue
-        if key in {"predicted_positive_rate", "target_positive_rate", "threshold", "reconstruction_mask_fraction", "reconstruction_used_mask"}:
+        if key in {
+            "predicted_positive_rate",
+            "target_positive_rate",
+            "point_predicted_positive_rate",
+            "point_target_positive_rate",
+            "threshold",
+            "reconstruction_mask_fraction",
+            "reconstruction_used_mask",
+        }:
             groups["calibration"].append(name)
     return {name: values for name, values in groups.items() if values}
 
@@ -719,13 +1381,34 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             "workspace_root": str(PROJECT_ROOT),
             "python_executable": str(_resolve_python_executable()),
             "preview_cache_limit": PREVIEW_CACHE_LIMIT,
+            "default_runs_root": str(_default_runs_root()),
             "default_run_name": f"workbench_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "default_train_template": "timercd_small.json" if "timercd_small.json" in templates else (templates[0] if templates else None),
+            "default_train_template": (
+                "timercd_pretrain_paper_aligned.json"
+                if "timercd_pretrain_paper_aligned.json" in templates
+                else (
+                    "timercd_small.json"
+                    if "timercd_small.json" in templates
+                    else (templates[0] if templates else None)
+                )
+            ),
             "train_templates": templates,
             "generation_defaults": {
                 "train_samples": 10000,
                 "val_samples": 1500,
                 "test_samples": 1500,
+                "direct_pack": True,
+                "window_pack": True,
+                "direct_window_pack": True,
+                "window_context_size": 1024,
+                "window_patch_size": 16,
+                "window_stride": 1024,
+                "window_windows_per_shard": 4096,
+                "window_include_tail": True,
+                "window_pad_short_sequences": True,
+                "window_debug_sidecar": False,
+                "window_train_min_patch_positive_ratio": 0.005208333333333333,
+                "window_train_min_anomaly_point_ratio": None,
                 "samples_per_shard": 128,
                 "seed_base": 100,
                 "train_device": "cuda",
@@ -875,11 +1558,11 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             feature_index = int(query.get("feature_index", [0])[0])
             slice_start = max(0, int(query.get("slice_start", [0])[0]))
             slice_end = int(query.get("slice_end", [0])[0])
-            context_size = int(query.get("context_size", [512])[0])
-            _requested_stride = int(query.get("stride", [256])[0])
-            patch_size = int(query.get("patch_size", [16])[0])
-            stride = context_size
-            include_tail = False
+            context_size = max(1, int(query.get("context_size", [512])[0]))
+            stride = max(1, int(query.get("stride", [context_size])[0]))
+            patch_size = max(1, int(query.get("patch_size", [16])[0]))
+            include_tail = True
+            pad_short_sequences = True
 
             row = next(
                 (entry for entry in _load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
@@ -902,28 +1585,51 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             normal_series = sample_payload["normal_series"]
             point_mask = sample_payload["point_mask"]
             point_mask_any = sample_payload["point_mask_any"]
+            feature_mask = np.asarray(point_mask[:, feature_index], dtype=np.uint8)
 
             windows = _iter_context_bounds(
                 length,
                 context_size=context_size,
-                stride=max(1, stride),
+                stride=stride,
                 include_tail=include_tail,
+                pad_short_sequences=pad_short_sequences,
             )
             window_rows: list[dict[str, Any]] = []
-            for start, end in windows[:500]:
-                effective = end - start
-                padded = 0
-                feature_mask = point_mask[start:end, feature_index].astype(np.uint8, copy=False)
-                patch_positive_ratio = 0.0
-                if patch_size > 0 and context_size % patch_size == 0:
-                    patch_labels = feature_mask.reshape(context_size // patch_size, patch_size).max(axis=1)
-                    patch_positive_ratio = float(patch_labels.mean()) if patch_labels.size else 0.0
+            padded_window_count = 0
+            short_window_count = 0
+            tail_window_count = 0
+            for index, (start, end) in enumerate(windows):
+                geometry = _describe_window(
+                    start=start,
+                    end=end,
+                    sequence_length=length,
+                    context_size=context_size,
+                    patch_size=patch_size,
+                )
+                if geometry["padded_steps"]:
+                    padded_window_count += 1
+                if geometry["is_short_window"]:
+                    short_window_count += 1
+                if geometry["is_tail_window"]:
+                    tail_window_count += 1
+                if index >= 500:
+                    continue
+
+                window_mask = _slice_or_pad_1d(
+                    feature_mask,
+                    start=start,
+                    end=end,
+                    target_length=context_size,
+                    pad_value=0,
+                    dtype=np.uint8,
+                )
+                patch_labels = _build_patch_labels_1d(window_mask, patch_size=patch_size)
+                patch_positive_ratio = float(patch_labels.mean()) if patch_labels.size else 0.0
                 window_rows.append(
                     {
                         "start": int(start),
                         "end": int(end),
-                        "effective_length": int(effective),
-                        "padded_steps": int(padded),
+                        **geometry,
                         "patch_positive_ratio": patch_positive_ratio,
                     }
                 )
@@ -948,7 +1654,11 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
                     "stride": stride,
                     "patch_size": patch_size,
                     "include_tail": include_tail,
+                    "pad_short_sequences": pad_short_sequences,
                     "num_windows": len(windows),
+                    "padded_window_count": padded_window_count,
+                    "short_window_count": short_window_count,
+                    "tail_window_count": tail_window_count,
                     "windows": window_rows,
                 },
                 "manifest_row": row,
@@ -967,11 +1677,11 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             sample_id = str(query.get("sample_id", [""])[0])
             feature_index = int(query.get("feature_index", [0])[0])
             window_index = max(0, int(query.get("window_index", [0])[0]))
-            context_size = int(query.get("context_size", [512])[0])
-            _requested_stride = max(1, int(query.get("stride", [256])[0]))
+            context_size = max(1, int(query.get("context_size", [512])[0]))
+            stride = max(1, int(query.get("stride", [context_size])[0]))
             patch_size = max(1, int(query.get("patch_size", [16])[0]))
-            stride = context_size
-            include_tail = False
+            include_tail = True
+            pad_short_sequences = True
 
             row = next(
                 (entry for entry in _load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
@@ -984,33 +1694,66 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
             length = int(sample_payload["length"])
             dims = int(sample_payload["num_series"])
             feature_index = max(0, min(feature_index, dims - 1))
-            windows = _iter_context_bounds(length, context_size=context_size, stride=stride, include_tail=include_tail)
+            windows = _iter_context_bounds(
+                length,
+                context_size=context_size,
+                stride=stride,
+                include_tail=include_tail,
+                pad_short_sequences=pad_short_sequences,
+            )
             if not windows:
                 raise ValueError(
-                    "No full training windows are available for the selected sample. "
-                    "Samples shorter than context_size and tail remainders are discarded."
+                    "No training windows are available for the selected sample after applying the current "
+                    "context_size / stride settings."
                 )
             if window_index >= len(windows):
                 window_index = len(windows) - 1
             start, end = windows[window_index]
-            effective_length = end - start
+            geometry = _describe_window(
+                start=start,
+                end=end,
+                sequence_length=length,
+                context_size=context_size,
+                patch_size=patch_size,
+            )
 
-            series_window = np.asarray(sample_payload["series"][start:end, feature_index], dtype=np.float32)
-            normal_window = np.asarray(sample_payload["normal_series"][start:end, feature_index], dtype=np.float32)
-            mask_window = np.asarray(sample_payload["point_mask"][start:end, feature_index], dtype=np.uint8)
-            any_window = np.asarray(sample_payload["point_mask_any"][start:end], dtype=np.uint8)
-            padding_mask = np.zeros((context_size,), dtype=np.uint8)
-
-            trimmed_length = context_size - (context_size % patch_size)
-            patch_labels = []
-            if trimmed_length > 0:
-                patch_labels = (
-                    mask_window[:trimmed_length]
-                    .reshape(trimmed_length // patch_size, patch_size)
-                    .max(axis=1)
-                    .astype(int)
-                    .tolist()
-                )
+            series_window = _slice_or_pad_1d(
+                sample_payload["series"][:, feature_index],
+                start=start,
+                end=end,
+                target_length=context_size,
+                pad_value=0.0,
+                dtype=np.float32,
+            )
+            normal_window = _slice_or_pad_1d(
+                sample_payload["normal_series"][:, feature_index],
+                start=start,
+                end=end,
+                target_length=context_size,
+                pad_value=0.0,
+                dtype=np.float32,
+            )
+            mask_window = _slice_or_pad_1d(
+                sample_payload["point_mask"][:, feature_index],
+                start=start,
+                end=end,
+                target_length=context_size,
+                pad_value=0,
+                dtype=np.uint8,
+            )
+            any_window = _slice_or_pad_1d(
+                sample_payload["point_mask_any"],
+                start=start,
+                end=end,
+                target_length=context_size,
+                pad_value=0,
+                dtype=np.uint8,
+            )
+            padding_mask = _build_padding_mask(
+                effective_length=int(geometry["effective_length"]),
+                context_size=context_size,
+            )
+            patch_labels = _build_patch_labels_1d(mask_window, patch_size=patch_size).astype(int).tolist()
 
             self._write_json(
                 HTTPStatus.OK,
@@ -1021,10 +1764,12 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
                     "window_index": window_index,
                     "start": int(start),
                     "end": int(end),
-                    "effective_length": int(effective_length),
+                    **geometry,
                     "context_size": int(context_size),
                     "stride": int(stride),
                     "patch_size": int(patch_size),
+                    "include_tail": include_tail,
+                    "pad_short_sequences": pad_short_sequences,
                     "series_feature": series_window.astype(float).tolist(),
                     "normal_series_feature": normal_window.astype(float).tolist(),
                     "point_mask_feature": mask_window.astype(int).tolist(),

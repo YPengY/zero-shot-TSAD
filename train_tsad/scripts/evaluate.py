@@ -24,6 +24,7 @@ from train_tsad.data import (  # noqa: E402
     ShardedSyntheticTsadDataset,
     SlidingContextWindowizer,
     SyntheticTsadDataset,
+    WindowShardedTsadDataset,
 )
 from train_tsad.evaluation import TimeRCDEvaluator  # noqa: E402
 from train_tsad.evaluation import PatchFeatureEvaluator  # noqa: E402
@@ -36,6 +37,25 @@ def _resolve_path(path: Path, *, base_dir: Path) -> Path:
     return path if path.is_absolute() else (base_dir / path).resolve()
 
 
+def _manifest_is_window_packed(manifest_path: Path | None) -> bool:
+    if manifest_path is None or not manifest_path.exists():
+        return False
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        row_text = line.strip()
+        if not row_text:
+            continue
+        row = json.loads(row_text)
+        return (
+            isinstance(row, dict)
+            and "shard_npz_path" in row
+            and ("window_index" in row or "sample_index" in row)
+            and "context_start" in row
+            and "context_end" in row
+            and "valid_length" in row
+        )
+    return False
+
+
 def _build_raw_dataset(config: ExperimentConfig, *, split: str):
     """Create the raw dataset for the target evaluation split."""
 
@@ -44,11 +64,29 @@ def _build_raw_dataset(config: ExperimentConfig, *, split: str):
     manifest_path = _resolve_path(manifest_path, base_dir=PROJECT_ROOT)
     manifest_value: Path | None = manifest_path if manifest_path.exists() else None
 
-    dataset_cls = ShardedSyntheticTsadDataset if config.data.use_sharded_dataset else SyntheticTsadDataset
-    return dataset_cls(
+    if config.data.use_sharded_dataset:
+        if _manifest_is_window_packed(manifest_value):
+            return WindowShardedTsadDataset(
+                root_dir=dataset_root,
+                split=split,
+                manifest_path=manifest_value,
+                max_cached_shards=config.data.max_cached_shards,
+            )
+        return ShardedSyntheticTsadDataset(
+            root_dir=dataset_root,
+            split=split,
+            manifest_path=manifest_value,
+            max_cached_shards=config.data.max_cached_shards,
+            load_normal_series=config.data.load_normal_series,
+            load_metadata=config.data.load_metadata,
+        )
+
+    return SyntheticTsadDataset(
         root_dir=dataset_root,
         split=split,
         manifest_path=manifest_value,
+        load_normal_series=config.data.load_normal_series,
+        load_metadata=config.data.load_metadata,
     )
 
 
@@ -60,14 +98,21 @@ def _build_eval_loader(raw_dataset, *, config: ExperimentConfig) -> DataLoader:
     - Disables reconstruction-target construction in collate for eval speed.
     """
 
-    windowizer = SlidingContextWindowizer(
-        context_size=config.data.context_size,
-        patch_size=config.data.patch_size,
-        stride=config.data.stride,
-        pad_short_sequences=config.data.pad_short_sequences,
-        include_tail=config.data.include_tail,
-    )
-    window_dataset = ContextWindowDataset(raw_dataset, windowizer)
+    if bool(getattr(raw_dataset, "is_prewindowed", False)):
+        window_dataset = raw_dataset
+    else:
+        windowizer = SlidingContextWindowizer(
+            context_size=config.data.context_size,
+            patch_size=config.data.patch_size,
+            stride=config.data.stride,
+            pad_short_sequences=config.data.pad_short_sequences,
+            include_tail=config.data.include_tail,
+        )
+        window_dataset = ContextWindowDataset(
+            raw_dataset,
+            windowizer,
+            enable_direct_window_read=config.data.enable_direct_window_read,
+        )
     return DataLoader(
         window_dataset,
         batch_size=config.data.eval_batch_size,
@@ -75,14 +120,26 @@ def _build_eval_loader(raw_dataset, *, config: ExperimentConfig) -> DataLoader:
         num_workers=config.data.num_workers,
         pin_memory=config.data.pin_memory,
         drop_last=False,
-        collate_fn=ContextWindowCollator(include_reconstruction_targets=False),
+        collate_fn=ContextWindowCollator(
+            include_reconstruction_targets=False,
+            patch_size=config.data.patch_size,
+            normalization_mode=config.data.normalization_mode,
+            normalization_eps=config.data.normalization_eps,
+        ),
     )
 
 
 def _infer_fixed_num_features(raw_dataset) -> int:
     """Infer the unique feature-channel count used to build the model."""
 
-    feature_counts = {int(raw_dataset[index].series.shape[1]) for index in range(len(raw_dataset))}
+    sample_num_features_getter = getattr(raw_dataset, "sample_num_features", None)
+    if callable(sample_num_features_getter):
+        feature_counts = {
+            int(sample_num_features_getter(index))
+            for index in range(len(raw_dataset))
+        }
+    else:
+        feature_counts = {int(raw_dataset[index].series.shape[1]) for index in range(len(raw_dataset))}
     if not feature_counts:
         raise FileNotFoundError("Could not infer the number of feature channels from the evaluation dataset.")
     if len(feature_counts) != 1:
@@ -117,7 +174,7 @@ def _auto_split(config: ExperimentConfig) -> str:
 def parse_args() -> argparse.Namespace:
     """Parse evaluation entrypoint CLI arguments."""
 
-    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_small.json"
+    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_pretrain_paper_aligned.json"
     parser = argparse.ArgumentParser(description="Evaluate a trained TimeRCD checkpoint.")
     parser.add_argument(
         "--config",
@@ -194,6 +251,9 @@ def main() -> None:
         attention_dropout=config.model.attention_dropout,
         activation=config.model.activation,
         use_learned_positional_encoding=config.model.use_learned_positional_encoding,
+        use_shared_output_projection=config.model.use_shared_output_projection,
+        use_observation_space_anomaly_head=config.model.use_observation_space_anomaly_head,
+        anomaly_patch_aggregation=config.model.anomaly_patch_aggregation,
         use_reconstruction_head=config.loss.reconstruction_loss_weight > 0.0,
     )
 

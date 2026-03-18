@@ -604,14 +604,28 @@ button:disabled {
 
 #series-canvas,
 #mask-canvas,
+#wb-sample-canvas,
+#wb-window-canvas,
+#wb-patch-canvas,
 #wb-loss-canvas,
 #wb-quality-canvas,
 #wb-calibration-canvas,
 .dag-svg {
   width: 100%;
+  display: block;
   background: white;
   border-radius: 18px;
   border: 1px solid rgba(216, 205, 189, 0.85);
+}
+
+#series-canvas {
+  height: auto;
+  aspect-ratio: 980 / 460;
+}
+
+#mask-canvas {
+  height: auto;
+  aspect-ratio: 980 / 260;
 }
 
 .hero-card #series-canvas {
@@ -798,6 +812,35 @@ button.ghost {
   background: white;
   display: grid;
   gap: 10px;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease,
+    background-color 140ms ease;
+}
+
+.event-card:hover,
+.event-card:focus-visible {
+  border-color: rgba(40, 83, 107, 0.38);
+  box-shadow: 0 10px 22px rgba(40, 83, 107, 0.1);
+}
+
+.event-card:focus-visible {
+  outline: 2px solid rgba(40, 83, 107, 0.38);
+  outline-offset: 2px;
+}
+
+.event-card.active {
+  border-color: rgba(40, 83, 107, 0.52);
+  background: linear-gradient(180deg, rgba(244, 249, 252, 0.98), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 24px rgba(40, 83, 107, 0.12);
+}
+
+.event-card.pinned {
+  transform: translateY(-1px);
+  border-color: rgba(181, 82, 50, 0.48);
+  box-shadow: 0 14px 28px rgba(181, 82, 50, 0.14);
 }
 
 .event-card-header {

@@ -10,15 +10,16 @@ from ..interfaces import Batch, ModelOutput
 from .metrics import compute_detection_metrics
 from .postprocess import (
     PatchFeatureAccumulator,
-    PatchFeatureRecord,
     PointScoreAccumulator,
     patch_scores_to_point_scores,
+    reduce_point_feature_scores,
     reduce_patch_scores,
 )
 
 
 def _compute_group_metrics(
-    records: list[PatchFeatureRecord],
+    scores: np.ndarray,
+    targets: np.ndarray,
     *,
     threshold: float,
     threshold_search: bool,
@@ -26,19 +27,19 @@ def _compute_group_metrics(
 ) -> dict[str, float]:
     """Compute binary metrics for one patch-feature record subset."""
 
-    scores = np.asarray([record.score for record in records], dtype=np.float32)
-    targets = np.asarray([record.target for record in records], dtype=np.bool_)
+    score_values = np.asarray(scores, dtype=np.float32)
+    target_values = np.asarray(targets, dtype=np.bool_)
     metrics = compute_detection_metrics(
-        scores,
-        targets,
+        score_values,
+        target_values,
         threshold=threshold,
         threshold_search=threshold_search,
         threshold_search_metric=threshold_search_metric,
     )
     metrics.pop("num_points", None)
     metrics.pop("num_positive_points", None)
-    metrics["num_patch_feature_units"] = float(len(records))
-    metrics["num_positive_patch_feature_units"] = float(targets.sum())
+    metrics["num_patch_feature_units"] = float(score_values.shape[0])
+    metrics["num_positive_patch_feature_units"] = float(target_values.sum())
     return metrics
 
 
@@ -92,26 +93,34 @@ class PatchFeatureEvaluator:
     def compute(self) -> dict[str, Any]:
         """Finalize all patch-feature units and compute global/grouped metrics."""
 
-        records = list(self.accumulator.finalize())
-        if not records:
+        (
+            sample_id_table,
+            sample_indices,
+            feature_indices,
+            scores,
+            targets,
+        ) = self.accumulator.finalize_arrays()
+        if scores.size == 0:
             raise ValueError("No patch-feature records were accumulated before `compute()`.")
 
         metrics = _compute_group_metrics(
-            records,
+            scores,
+            targets,
             threshold=self.threshold,
             threshold_search=self.threshold_search,
             threshold_search_metric=self.threshold_search_metric,
         )
         metrics["task"] = "patch_feature"
         metrics["patch_feature_score_aggregation"] = self.patch_feature_score_aggregation
-        metrics["num_samples"] = float(len({record.sample_id for record in records}))
+        metrics["num_samples"] = float(len(sample_id_table))
 
         if self.report_per_feature:
             per_feature: dict[str, dict[str, float]] = {}
-            for feature_index in sorted({record.feature_index for record in records}):
-                feature_records = [record for record in records if record.feature_index == feature_index]
+            for feature_index in sorted(np.unique(feature_indices).tolist()):
+                mask = feature_indices == int(feature_index)
                 per_feature[str(feature_index)] = _compute_group_metrics(
-                    feature_records,
+                    scores[mask],
+                    targets[mask],
                     threshold=self.threshold,
                     threshold_search=self.threshold_search,
                     threshold_search_metric=self.threshold_search_metric,
@@ -120,10 +129,11 @@ class PatchFeatureEvaluator:
 
         if self.report_per_sample:
             per_sample: dict[str, dict[str, float]] = {}
-            for sample_id in sorted({record.sample_id for record in records}):
-                sample_records = [record for record in records if record.sample_id == sample_id]
+            for sample_index, sample_id in enumerate(sample_id_table):
+                mask = sample_indices == sample_index
                 per_sample[sample_id] = _compute_group_metrics(
-                    sample_records,
+                    scores[mask],
+                    targets[mask],
                     threshold=self.threshold,
                     threshold_search=self.threshold_search,
                     threshold_search_metric=self.threshold_search_metric,
@@ -149,9 +159,9 @@ class TimeRCDEvaluator:
         """Accumulate one batch of window predictions.
 
         Workflow per sample:
-        1. Convert logits to probabilities.
-        2. Reduce per-feature patch scores to scalar patch scores.
-        3. Expand patch scores to point scores.
+        1. Convert anomaly outputs to probabilities.
+        2. If point-level scores are available, reduce them across features directly.
+        3. Otherwise, reduce patch scores and expand them back to points.
         4. Merge window scores back into sample timeline accumulator.
         """
 
@@ -162,17 +172,32 @@ class TimeRCDEvaluator:
         else:
             point_targets = batch.point_mask_any
 
-        probabilities = torch.sigmoid(output.logits).detach().cpu().numpy()
         target_array = point_targets.detach().cpu().numpy().astype(np.uint8)
         starts = batch.context_start.detach().cpu().numpy()
         ends = batch.context_end.detach().cpu().numpy()
+        point_probabilities = (
+            torch.sigmoid(output.point_logits).detach().cpu().numpy()
+            if output.point_logits is not None
+            else None
+        )
+        patch_probabilities = (
+            torch.sigmoid(output.logits).detach().cpu().numpy()
+            if output.point_logits is None
+            else None
+        )
 
         for index, sample_id in enumerate(batch.sample_ids):
-            patch_scores = reduce_patch_scores(
-                probabilities[index],
-                reduction=self.score_reduction,
-            )
-            point_scores = patch_scores_to_point_scores(patch_scores, patch_size=self.patch_size)
+            if point_probabilities is not None:
+                point_scores = reduce_point_feature_scores(
+                    point_probabilities[index],
+                    reduction=self.score_reduction,
+                )
+            else:
+                patch_scores = reduce_patch_scores(
+                    patch_probabilities[index],
+                    reduction=self.score_reduction,
+                )
+                point_scores = patch_scores_to_point_scores(patch_scores, patch_size=self.patch_size)
 
             state = self.sample_states.setdefault(
                 sample_id,

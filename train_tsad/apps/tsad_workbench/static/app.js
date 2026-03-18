@@ -16,7 +16,7 @@
     "workbench.previewGenerate": "Build Preview Gallery",
     "workbench.generationRail": "Dataset Workflow",
     "workbench.generateTitle": "Generate And Pack Dataset",
-    "workbench.generateSubtitle": "The current edited config will be written as the runtime synthetic config, then generated, packed, and linked to a train config.",
+    "workbench.generateSubtitle": "The current edited config will be written as the runtime synthetic config, the train/val/test splits will be generated in parallel, then packed and linked to a train config.",
     "workbench.runName": "Run Name",
     "workbench.trainSamples": "Train Samples",
     "workbench.valSamples": "Val Samples",
@@ -44,7 +44,7 @@
     "workbench.stride": "Window Step",
     "workbench.patchSize": "Patch Size",
     "workbench.windowIndex": "Window Index",
-    "workbench.windowRuleHint": "Uses non-overlapping full windows only. Tail remainder and short samples are discarded.",
+    "workbench.windowRuleHint": "Uses the requested stride. Tail remainder and short samples are kept as right-padded windows.",
     "workbench.loadSamples": "Load Samples",
     "workbench.previewPackedSample": "Preview Sample Slice",
     "workbench.previewWindow": "Preview Window",
@@ -63,11 +63,11 @@
     "workbench.startTraining": "Start Training",
     "workbench.refreshTraining": "Refresh Metrics",
     "workbench.lossCanvasTitle": "Loss Curve",
-    "workbench.metricCanvasTitle": "Validation Curve",
+    "workbench.metricCanvasTitle": "Quality Curves",
     "workbench.calibrationCanvasTitle": "Behavior And Calibration",
-    "workbench.lossCanvasHint": "Track total, anomaly, and reconstruction loss together.",
-    "workbench.metricCanvasHint": "Watch detection quality move instead of waiting for the final summary.",
-    "workbench.calibrationCanvasHint": "Compare target ratio, predicted ratio, threshold, and mask usage.",
+    "workbench.lossCanvasHint": "Track total, patch anomaly, point auxiliary, and reconstruction loss together.",
+    "workbench.metricCanvasHint": "Watch patch-level and point-level quality instead of waiting for the final summary.",
+    "workbench.calibrationCanvasHint": "Compare patch and point positive rates, threshold, and mask usage.",
     "workbench.trainingProgressEyebrow": "Live Progress",
     "workbench.trainingProgressTitle": "Current Run",
     "workbench.trainingDetailsTitle": "Raw Training Details",
@@ -76,6 +76,7 @@
     "workbench.kpi.monitor": "Best monitored metric",
     "workbench.kpi.trainLoss": "Train total loss",
     "workbench.kpi.valQuality": "Latest validation signal",
+    "workbench.kpi.pointHead": "Observation-space auxiliary head",
     "workbench.kpi.learningRate": "Learning rate",
     "workbench.kpi.balance": "Positive-rate gap",
     "workbench.kpi.runtime": "Elapsed / ETA",
@@ -104,6 +105,10 @@
     "workbench.label.window": "window",
     "workbench.label.effective": "effective",
     "workbench.label.patches": "patches",
+    "workbench.label.padded": "padded",
+    "workbench.label.validPatches": "valid patches",
+    "workbench.label.tail": "tail",
+    "workbench.label.short": "short",
     "workbench.label.job": "job",
     "workbench.label.status": "status",
     "workbench.label.started": "started",
@@ -258,6 +263,7 @@ const TOKEN_LABELS = {
     mexh: "Mexican Hat",
     shan: "Shannon",
     uniform: "Uniform",
+    truncated_exponential: "Truncated Exponential",
     seasonal_eligible: "Seasonal Eligible",
     upward_spike: "Upward Spike",
     downward_spike: "Downward Spike",
@@ -330,6 +336,7 @@ const TOKEN_LABELS = {
     mexh: "墨西哥帽",
     shan: "Shannon",
     uniform: "均匀",
+    truncated_exponential: "截断指数",
     seasonal_eligible: "季节有效节点",
     upward_spike: "上升尖峰",
     downward_spike: "下降尖峰",
@@ -418,14 +425,20 @@ const METRIC_LABELS = {
   en: {
     total_loss: "Total loss",
     anomaly_loss: "Anomaly loss",
+    point_anomaly_loss: "Point anomaly loss",
     reconstruction_loss: "Reconstruction loss",
     patch_accuracy: "Patch accuracy",
+    point_accuracy: "Point accuracy",
     precision: "Precision",
     recall: "Recall",
     f1: "F1",
     pr_auc: "PR-AUC",
     predicted_positive_rate: "Predicted positive rate",
     target_positive_rate: "Target positive rate",
+    point_predicted_positive_rate: "Point predicted positive rate",
+    point_target_positive_rate: "Point target positive rate",
+    anomaly_weight: "Patch anomaly weight",
+    point_anomaly_weight: "Point anomaly weight",
     threshold: "Threshold",
     reconstruction_mask_fraction: "Mask fraction",
     reconstruction_used_mask: "Mask enabled",
@@ -433,14 +446,20 @@ const METRIC_LABELS = {
   zh: {
     total_loss: "总损失",
     anomaly_loss: "异常损失",
+    point_anomaly_loss: "点级异常损失",
     reconstruction_loss: "重建损失",
     patch_accuracy: "Patch 准确率",
+    point_accuracy: "点级准确率",
     precision: "精确率",
     recall: "召回率",
     f1: "F1",
     pr_auc: "PR-AUC",
     predicted_positive_rate: "预测正例占比",
     target_positive_rate: "目标正例占比",
+    point_predicted_positive_rate: "点级预测正例占比",
+    point_target_positive_rate: "点级目标正例占比",
+    anomaly_weight: "Patch 异常权重",
+    point_anomaly_weight: "点级异常权重",
     threshold: "阈值",
     reconstruction_mask_fraction: "掩码占比",
     reconstruction_used_mask: "启用掩码",
@@ -454,6 +473,8 @@ const state = {
   locale: "en",
   selectedNodes: [],
   activeTab: "series",
+  hoveredEventIndex: null,
+  pinnedEventIndex: null,
   configVersion: 0,
   requestIds: {
     randomize: 0,
@@ -496,6 +517,7 @@ const dom = {
   metadataStages: document.getElementById("metadata-stages"),
   eventSummary: document.getElementById("event-summary"),
   eventsTable: document.getElementById("events-table"),
+  previewTabs: document.querySelector(".preview-tabs"),
   tabs: Array.from(document.querySelectorAll(".tab")),
   tabPanels: Array.from(document.querySelectorAll(".tab-panel")),
   importModal: document.getElementById("import-modal"),
@@ -518,6 +540,129 @@ const palette = [
   "#f4a261",
 ];
 
+const responsiveCanvasBindings = new Map();
+const pendingResponsiveRenders = new Set();
+let responsiveCanvasObserver = null;
+let responsiveCanvasFrame = 0;
+let responsiveCanvasesBound = false;
+
+function getNodeColor(nodeIndex) {
+  const normalized = Number(nodeIndex);
+  if (!Number.isFinite(normalized)) {
+    return palette[0];
+  }
+  const paletteIndex = ((Math.trunc(normalized) % palette.length) + palette.length) % palette.length;
+  return palette[paletteIndex];
+}
+
+function rememberCanvasLogicalSize(canvas) {
+  if (!canvas) {
+    return;
+  }
+  if (!canvas.dataset.logicalWidth) {
+    canvas.dataset.logicalWidth = String(canvas.getAttribute("width") || canvas.width || 300);
+  }
+  if (!canvas.dataset.logicalHeight) {
+    canvas.dataset.logicalHeight = String(canvas.getAttribute("height") || canvas.height || 150);
+  }
+}
+
+function prepareCanvas2d(canvas) {
+  rememberCanvasLogicalSize(canvas);
+  const fallbackWidth = Math.max(1, Number(canvas.dataset.logicalWidth || 300));
+  const fallbackHeight = Math.max(1, Number(canvas.dataset.logicalHeight || 150));
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = rect.width > 0 ? rect.width : fallbackWidth;
+  const cssHeight = rect.height > 0 ? rect.height : fallbackHeight;
+  const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
+  const displayWidth = Math.max(1, Math.round(cssWidth * pixelRatio));
+  const displayHeight = Math.max(1, Math.round(cssHeight * pixelRatio));
+  if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.imageSmoothingEnabled = true;
+  return { context, width: cssWidth, height: cssHeight, pixelRatio };
+}
+
+function queueResponsiveRender(renderFn) {
+  if (typeof renderFn !== "function") {
+    return;
+  }
+  pendingResponsiveRenders.add(renderFn);
+  if (responsiveCanvasFrame) {
+    return;
+  }
+  responsiveCanvasFrame = window.requestAnimationFrame(() => {
+    responsiveCanvasFrame = 0;
+    const renders = Array.from(pendingResponsiveRenders);
+    pendingResponsiveRenders.clear();
+    renders.forEach((fn) => fn());
+  });
+}
+
+function bindResponsiveCanvas(canvas, renderFn, options = {}) {
+  const { observe = true } = options;
+  if (!canvas || typeof renderFn !== "function" || responsiveCanvasBindings.has(canvas)) {
+    return;
+  }
+  rememberCanvasLogicalSize(canvas);
+  responsiveCanvasBindings.set(canvas, renderFn);
+  if (observe && responsiveCanvasObserver) {
+    responsiveCanvasObserver.observe(canvas);
+  }
+}
+
+function redrawResponsiveCanvases() {
+  const renderFns = new Set(responsiveCanvasBindings.values());
+  renderFns.forEach((fn) => queueResponsiveRender(fn));
+}
+
+function queueActivePreviewTabRender(tabId = state.activeTab) {
+  const renderFn = {
+    series: renderSeries,
+    mask: renderMask,
+    dag: renderDag,
+  }[tabId];
+  if (typeof renderFn !== "function") {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    queueResponsiveRender(renderFn);
+  });
+}
+
+function initResponsiveCanvasRegistry() {
+  if (responsiveCanvasesBound) {
+    return;
+  }
+  responsiveCanvasesBound = true;
+  if ("ResizeObserver" in window) {
+    responsiveCanvasObserver = new ResizeObserver((entries) => {
+      const renderFns = new Set();
+      entries.forEach((entry) => {
+        const renderFn = responsiveCanvasBindings.get(entry.target);
+        if (renderFn) {
+          renderFns.add(renderFn);
+        }
+      });
+      renderFns.forEach((fn) => queueResponsiveRender(fn));
+    });
+  }
+  window.addEventListener("resize", redrawResponsiveCanvases, { passive: true });
+  bindResponsiveCanvas(dom.seriesCanvas, renderSeries, { observe: false });
+  bindResponsiveCanvas(dom.maskCanvas, renderMask, { observe: false });
+  bindResponsiveCanvas(workbenchDom.sampleCanvas, renderWorkbenchVisuals);
+  bindResponsiveCanvas(workbenchDom.windowCanvas, renderWorkbenchVisuals);
+  bindResponsiveCanvas(workbenchDom.patchCanvas, renderWorkbenchVisuals);
+  bindResponsiveCanvas(workbenchDom.lossCanvas, renderTrainingMonitor);
+  bindResponsiveCanvas(workbenchDom.qualityCanvas, renderTrainingMonitor);
+  bindResponsiveCanvas(workbenchDom.calibrationCanvas, renderTrainingMonitor);
+  redrawResponsiveCanvases();
+}
+
 async function init() {
   const response = await fetch("/api/bootstrap");
   const payload = await response.json();
@@ -527,9 +672,11 @@ async function init() {
   state.configVersion = 1;
   bindEvents();
   applyLocale();
+  setActiveTab(state.activeTab);
   renderForm();
   clearPreview();
   initWorkbench(payload.workbench ?? {});
+  initResponsiveCanvasRegistry();
   updateToolbarState();
 }
 
@@ -630,6 +777,8 @@ function bindEvents() {
         return;
       }
       state.preview = payload.preview;
+      state.hoveredEventIndex = null;
+      state.pinnedEventIndex = null;
       resetNodeSelection();
       renderPreview();
       setStatus(t("status.previewed"), "ok");
@@ -724,14 +873,167 @@ function bindEvents() {
 
   dom.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
-      state.activeTab = tab.dataset.tab;
-      dom.tabs.forEach((item) => item.classList.toggle("active", item === tab));
-      dom.tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${state.activeTab}`));
+      setActiveTab(tab.dataset.tab || "series");
     });
+  });
+
+  dom.eventsTable.addEventListener("click", (event) => {
+    const card = event.target instanceof HTMLElement ? event.target.closest(".event-card[data-event-index]") : null;
+    if (!card) {
+      return;
+    }
+    togglePinnedEvent(Number(card.dataset.eventIndex));
+  });
+
+  dom.eventsTable.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof HTMLElement) || !["Enter", " "].includes(event.key)) {
+      return;
+    }
+    const card = event.target.closest(".event-card[data-event-index]");
+    if (!card) {
+      return;
+    }
+    event.preventDefault();
+    togglePinnedEvent(Number(card.dataset.eventIndex));
+  });
+
+  dom.eventsTable.addEventListener("mouseover", (event) => {
+    if (!(event.target instanceof HTMLElement)) {
+      return;
+    }
+    const card = event.target.closest(".event-card[data-event-index]");
+    if (!card) {
+      return;
+    }
+    setHoveredEvent(Number(card.dataset.eventIndex));
+  });
+
+  dom.eventsTable.addEventListener("mouseleave", () => {
+    clearHoveredEvent();
+  });
+
+  dom.eventsTable.addEventListener("focusin", (event) => {
+    if (!(event.target instanceof HTMLElement)) {
+      return;
+    }
+    const card = event.target.closest(".event-card[data-event-index]");
+    if (!card) {
+      return;
+    }
+    setHoveredEvent(Number(card.dataset.eventIndex));
+  });
+
+  dom.eventsTable.addEventListener("focusout", (event) => {
+    if (!(event.relatedTarget instanceof HTMLElement) || !dom.eventsTable.contains(event.relatedTarget)) {
+      clearHoveredEvent();
+    }
   });
 }
 
+function setActiveTab(tabId) {
+  state.activeTab = tabId;
+  dom.tabs.forEach((item) => {
+    const isActive = item.dataset.tab === tabId;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+    item.tabIndex = isActive ? 0 : -1;
+  });
+  dom.tabPanels.forEach((panel) => {
+    const isActive = panel.id === `tab-${tabId}`;
+    panel.classList.toggle("active", isActive);
+    panel.hidden = !isActive;
+  });
+  queueActivePreviewTabRender(tabId);
+}
+
+function getActiveEventIndex() {
+  return state.pinnedEventIndex ?? state.hoveredEventIndex;
+}
+
+function getActivePreviewEvent() {
+  const activeIndex = getActiveEventIndex();
+  const events = state.preview?.labels?.events ?? [];
+  if (!Number.isInteger(activeIndex) || activeIndex < 0 || activeIndex >= events.length) {
+    return null;
+  }
+  return { ...events[activeIndex], index: activeIndex };
+}
+
+function syncEventCardStates() {
+  const activeIndex = getActiveEventIndex();
+  const pinnedIndex = state.pinnedEventIndex;
+  Array.from(dom.eventsTable.querySelectorAll(".event-card[data-event-index]")).forEach((card) => {
+    const cardIndex = Number(card.dataset.eventIndex);
+    card.classList.toggle("active", cardIndex === activeIndex);
+    card.classList.toggle("pinned", cardIndex === pinnedIndex);
+    card.setAttribute("aria-pressed", cardIndex === pinnedIndex ? "true" : "false");
+  });
+}
+
+function refreshEventHighlight() {
+  if (state.preview && state.activeTab === "series") {
+    queueResponsiveRender(renderSeries);
+  }
+  syncEventCardStates();
+}
+
+function buildSelectedMaskAny(pointMask, selectedNodes) {
+  if (!Array.isArray(pointMask) || !Array.isArray(selectedNodes) || selectedNodes.length === 0) {
+    return [];
+  }
+  return pointMask.map((row) => selectedNodes.some((node) => Boolean(row?.[node])));
+}
+
+function findPositiveMaskBounds(maskAny) {
+  if (!Array.isArray(maskAny) || maskAny.length === 0) {
+    return null;
+  }
+  const start = maskAny.findIndex(Boolean);
+  if (start < 0) {
+    return null;
+  }
+  let end = maskAny.length;
+  while (end > start && !maskAny[end - 1]) {
+    end -= 1;
+  }
+  return { start, end };
+}
+
+function setHoveredEvent(index) {
+  if (!Number.isInteger(index) || index < 0 || state.hoveredEventIndex === index) {
+    return;
+  }
+  state.hoveredEventIndex = index;
+  refreshEventHighlight();
+}
+
+function clearHoveredEvent() {
+  if (state.hoveredEventIndex == null) {
+    return;
+  }
+  state.hoveredEventIndex = null;
+  refreshEventHighlight();
+}
+
+function togglePinnedEvent(index) {
+  if (!Number.isInteger(index) || index < 0) {
+    return;
+  }
+  state.pinnedEventIndex = state.pinnedEventIndex === index ? null : index;
+  state.hoveredEventIndex = null;
+  setActiveTab("series");
+  refreshEventHighlight();
+}
+
 function applyLocale() {
+  dom.previewTabs?.setAttribute("role", "tablist");
+  dom.tabs.forEach((tab) => {
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", `tab-${tab.dataset.tab}`);
+  });
+  dom.tabPanels.forEach((panel) => {
+    panel.setAttribute("role", "tabpanel");
+  });
   dom.translatables.forEach((element) => {
     if (element.id === "toggle-language") {
       return;
@@ -777,6 +1079,34 @@ function renderWorkbenchInspectorState() {
   setWorkbenchWarning("");
 }
 
+function renderWorkbenchVisuals() {
+  if (workbenchState.currentSample) {
+    drawSeriesPairChart(
+      workbenchDom.sampleCanvas,
+      workbenchState.currentSample.series_feature ?? [],
+      workbenchState.currentSample.normal_series_feature ?? [],
+      workbenchState.currentSample.point_mask_feature ?? [],
+      [],
+    );
+  } else {
+    clearCanvas(workbenchDom.sampleCanvas);
+  }
+
+  if (workbenchState.currentWindow) {
+    drawSeriesPairChart(
+      workbenchDom.windowCanvas,
+      workbenchState.currentWindow.series_feature ?? [],
+      workbenchState.currentWindow.normal_series_feature ?? [],
+      workbenchState.currentWindow.point_mask_feature ?? [],
+      workbenchState.currentWindow.padding_mask ?? [],
+    );
+    drawPatchBarChart(workbenchDom.patchCanvas, workbenchState.currentWindow.patch_labels ?? []);
+  } else {
+    clearCanvas(workbenchDom.windowCanvas);
+    clearCanvas(workbenchDom.patchCanvas);
+  }
+}
+
 function setWorkbenchWarning(message) {
   const text = String(message ?? "").trim();
   workbenchDom.datasetWarning.textContent = text;
@@ -788,22 +1118,49 @@ function clearWorkbenchInspectorState({ clearJson = false } = {}) {
   workbenchState.currentWindow = null;
   workbenchState.activeInspector = null;
   renderWorkbenchInspectorState();
-  clearCanvas(workbenchDom.sampleCanvas);
-  clearCanvas(workbenchDom.windowCanvas);
-  clearCanvas(workbenchDom.patchCanvas);
+  renderWorkbenchVisuals();
   if (clearJson) {
     workbenchDom.datasetJson.textContent = t("workbench.samplesEmpty");
   }
 }
 
 function buildPatchAlignmentWarning(payload) {
-  if (!payload?.patch_alignment_warning) {
-    return "";
+  const messages = [];
+  if (typeof payload?.padded_steps === "number" && payload.padded_steps > 0) {
+    if (payload.is_short_window) {
+      messages.push(localizeText(
+        `Short sample is kept as one right-padded window (${payload.padded_steps} padded steps).`,
+        `短样本会保留为一个右侧补齐窗口（补齐 ${payload.padded_steps} 个时间步）。`,
+      ));
+    } else if (payload.is_tail_window) {
+      messages.push(localizeText(
+        `Tail remainder is kept as one right-padded window (${payload.padded_steps} padded steps).`,
+        `尾部剩余片段会保留为一个右侧补齐窗口（补齐 ${payload.padded_steps} 个时间步）。`,
+      ));
+    } else {
+      messages.push(localizeText(
+        `This window is right-padded by ${payload.padded_steps} steps.`,
+        `当前窗口右侧补齐了 ${payload.padded_steps} 个时间步。`,
+      ));
+    }
+    if (
+      typeof payload.valid_patch_count === "number"
+      && typeof payload.total_patch_count === "number"
+      && payload.total_patch_count > 0
+    ) {
+      messages.push(localizeText(
+        `Only the first ${payload.valid_patch_count}/${payload.total_patch_count} patches are fully observed before padding.`,
+        `补齐前只有前 ${payload.valid_patch_count}/${payload.total_patch_count} 个 Patch 完全由真实观测组成。`,
+      ));
+    }
   }
-  return localizeText(
-    `Patch labels only cover complete patches because context_size (${payload.context_size}) is not divisible by patch_size (${payload.patch_size}).`,
-    `由于 context_size (${payload.context_size}) 不能被 patch_size (${payload.patch_size}) 整除，Patch 标签只覆盖完整 patch，末尾残余步长不会计入标签。`,
-  );
+  if (payload?.patch_alignment_warning) {
+    messages.push(localizeText(
+      `Patch labels only cover complete patches because context_size (${payload.context_size}) is not divisible by patch_size (${payload.patch_size}).`,
+      `由于 context_size (${payload.context_size}) 不能被 patch_size (${payload.patch_size}) 整除，Patch 标签只覆盖完整 patch，末尾残余步长不会计入标签。`,
+    ));
+  }
+  return messages.join(" ");
 }
 
 function buildOverwriteConfirmMessage(runName) {
@@ -1117,7 +1474,7 @@ function renderNodeSelector() {
     chip.className = "node-pill";
     chip.innerHTML = `
       <input type="checkbox" value="${index}" ${state.selectedNodes.includes(index) ? "checked" : ""} />
-      <span class="node-swatch" style="background:${palette[index % palette.length]}"></span>
+      <span class="node-swatch" style="background:${getNodeColor(index)}"></span>
       <span>${t("common.node")} ${index}</span>
     `;
     chip.querySelector("input").addEventListener("change", (event) => {
@@ -1155,8 +1512,11 @@ function renderSeries() {
     renderEmptyDatasetHint();
     return;
   }
+  const selectedMaskAny = buildSelectedMaskAny(state.preview.labels?.point_mask ?? [], state.selectedNodes);
   updateDatasetHint(datasetName);
-  drawLineChart(dom.seriesCanvas, series, state.selectedNodes, state.preview.labels.point_mask_any);
+  drawLineChart(dom.seriesCanvas, series, state.selectedNodes, selectedMaskAny, {
+    highlightedEvent: getActivePreviewEvent(),
+  });
   renderSeriesLegend();
 }
 
@@ -1165,7 +1525,27 @@ function renderMask() {
     clearCanvas(dom.maskCanvas);
     return;
   }
-  drawMaskHeatmap(dom.maskCanvas, state.preview.labels.point_mask, state.selectedNodes);
+  const pointMask = Array.isArray(state.preview.labels?.point_mask) ? state.preview.labels.point_mask : [];
+  const selectedMaskAny = buildSelectedMaskAny(pointMask, state.selectedNodes);
+  const focusBounds = findPositiveMaskBounds(selectedMaskAny);
+  if (!focusBounds) {
+    drawMaskHeatmap(dom.maskCanvas, [], state.selectedNodes, {
+      emptyMessage: localizeText(
+        "No positive labels are present for the current node selection.",
+        "当前节点选择下没有正标签区域。",
+      ),
+    });
+    return;
+  }
+  drawMaskHeatmap(
+    dom.maskCanvas,
+    pointMask.slice(focusBounds.start, focusBounds.end),
+    state.selectedNodes,
+    {
+      xStart: focusBounds.start,
+      xEnd: focusBounds.end,
+    },
+  );
 }
 
 function renderDag() {
@@ -1197,6 +1577,8 @@ function renderMetadata() {
   const events = state.preview.labels.events ?? [];
   dom.eventsTable.innerHTML = "";
   if (events.length === 0) {
+    state.hoveredEventIndex = null;
+    state.pinnedEventIndex = null;
     const placeholder = document.createElement("p");
     placeholder.className = "subtle";
     placeholder.textContent = t("status.eventsEmpty");
@@ -1204,9 +1586,12 @@ function renderMetadata() {
     return;
   }
 
-  events.forEach((event) => {
+  events.forEach((event, index) => {
     const card = document.createElement("div");
     card.className = "event-card";
+    card.dataset.eventIndex = String(index);
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
 
     const header = document.createElement("div");
     header.className = "event-card-header";
@@ -1228,7 +1613,7 @@ function renderMetadata() {
 
     const locationBadge = document.createElement("div");
     locationBadge.className = "event-card-location";
-    locationBadge.textContent = `${t("common.node")} ${event.node}`;
+    locationBadge.textContent = `${t("common.node")} ${event.node} · [${event.t_start}, ${event.t_end})`;
     header.appendChild(locationBadge);
     card.appendChild(header);
 
@@ -1263,6 +1648,7 @@ function renderMetadata() {
     card.appendChild(params);
     dom.eventsTable.appendChild(card);
   });
+  syncEventCardStates();
 }
 
 function renderMetadataStages() {
@@ -1406,6 +1792,8 @@ function makeEventMetaItem(labelText, valueText) {
 function updateDatasetHint(datasetName) {
   const entry = (state.preview?.series_catalog ?? []).find((item) => item.id === datasetName);
   const stats = state.preview?.debug?.series_stats?.[datasetName];
+  const activeEvent = getActivePreviewEvent();
+  const selectedMaskAny = buildSelectedMaskAny(state.preview?.labels?.point_mask ?? [], state.selectedNodes);
   if (!entry) {
     renderEmptyDatasetHint();
     return;
@@ -1421,12 +1809,18 @@ function updateDatasetHint(datasetName) {
     `<span class="hero-badge"><strong>${escapeHtml(t("common.absMax"))}</strong>${escapeHtml(formatMetric(stats?.abs_max))}</span>`,
   ].join("");
 
-  const windowCount = countMaskWindows(state.preview.labels.point_mask_any ?? []);
-  dom.seriesFooter.innerHTML = [
+  const windowCount = countMaskWindows(selectedMaskAny);
+  const footerItems = [
     `<span class="footer-chip">${escapeHtml(t("preview.shadedWindows"))}: ${escapeHtml(String(windowCount))}</span>`,
     `<span class="footer-chip">${escapeHtml(t("common.selectedNodes"))}: ${escapeHtml(String(state.selectedNodes.length))}</span>`,
     `<span class="footer-chip">${escapeHtml(t("common.length"))}: ${escapeHtml(String(state.preview.summary.length))}</span>`,
-  ].join("");
+  ];
+  if (activeEvent) {
+    footerItems.unshift(
+      `<span class="footer-chip"><strong>${escapeHtml(formatTokenLabel(activeEvent.anomaly_type))}</strong> ${escapeHtml(`[${activeEvent.t_start}, ${activeEvent.t_end})`)}</span>`,
+    );
+  }
+  dom.seriesFooter.innerHTML = footerItems.join("");
 
   dom.datasetHint.innerHTML = `
     <div class="dataset-header">
@@ -1477,8 +1871,8 @@ function renderSeriesLegend() {
   }
   renderLegendChips(
     dom.seriesLegend,
-    state.selectedNodes.map((node, index) => ({
-      color: palette[index % palette.length],
+    state.selectedNodes.map((node) => ({
+      color: getNodeColor(node),
       label: `${t("common.node")} ${node}`,
     })),
   );
@@ -1501,10 +1895,9 @@ function renderLegendChips(container, items) {
     .join("");
 }
 
-function drawLineChart(canvas, data, selectedNodes, maskAny) {
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+function drawLineChart(canvas, data, selectedNodes, maskAny, options = {}) {
+  const { highlightedEvent = null } = options;
+  const { context, width, height } = prepareCanvas2d(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
@@ -1515,10 +1908,15 @@ function drawLineChart(canvas, data, selectedNodes, maskAny) {
   const padding = { left: 60, right: 24, top: 24, bottom: 40 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const values = selectedNodes.flatMap((node) => data.map((row) => row[node]));
+  const values = selectedNodes
+    .flatMap((node) => data.map((row) => row[node]))
+    .filter((value) => Number.isFinite(value));
   let minValue = Math.min(...values);
   let maxValue = Math.max(...values);
-  if (Math.abs(maxValue - minValue) < 1e-8) {
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+    minValue = -1;
+    maxValue = 1;
+  } else if (Math.abs(maxValue - minValue) < 1e-8) {
     minValue -= 1;
     maxValue += 1;
   }
@@ -1542,9 +1940,26 @@ function drawLineChart(canvas, data, selectedNodes, maskAny) {
     }
   });
 
+  if (highlightedEvent && Number.isFinite(highlightedEvent.t_start) && Number.isFinite(highlightedEvent.t_end)) {
+    const start = Math.max(0, Math.min(data.length - 1, Number(highlightedEvent.t_start)));
+    const end = Math.max(start + 1, Math.min(data.length, Number(highlightedEvent.t_end)));
+    const x1 = padding.left + (start / Math.max(1, data.length - 1)) * plotWidth;
+    const x2 = padding.left + ((Math.max(start, end - 1)) / Math.max(1, data.length - 1)) * plotWidth;
+    context.fillStyle = "rgba(40, 83, 107, 0.16)";
+    context.fillRect(x1, padding.top, Math.max(3, x2 - x1), plotHeight);
+    context.strokeStyle = "rgba(40, 83, 107, 0.7)";
+    context.lineWidth = 1.4;
+    context.beginPath();
+    context.moveTo(x1, padding.top);
+    context.lineTo(x1, padding.top + plotHeight);
+    context.moveTo(x2, padding.top);
+    context.lineTo(x2, padding.top + plotHeight);
+    context.stroke();
+  }
+
   drawAxes(context, padding, width, height, minValue, maxValue, data.length);
-  selectedNodes.forEach((node, index) => {
-    context.strokeStyle = palette[index % palette.length];
+  selectedNodes.forEach((node) => {
+    context.strokeStyle = getNodeColor(node);
     context.lineWidth = 2;
     context.beginPath();
     data.forEach((row, step) => {
@@ -1593,30 +2008,45 @@ function drawAxes(context, padding, width, height, minValue, maxValue, length, o
   context.fillText(endText, Math.max(padding.left + 20, width - padding.right - endWidth), height - 10);
 }
 
-function drawMaskHeatmap(canvas, pointMask, selectedNodes) {
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+function drawMaskHeatmap(canvas, pointMask, selectedNodes, options = {}) {
+  const {
+    xStart = 0,
+    xEnd = Array.isArray(pointMask) ? pointMask.length : 0,
+    emptyMessage = localizeText("No mask data available.", "当前没有可显示的掩码数据。"),
+  } = options;
+  const { context, width, height } = prepareCanvas2d(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
-  if (!pointMask || selectedNodes.length === 0) {
+  if (!Array.isArray(pointMask) || pointMask.length === 0 || selectedNodes.length === 0) {
+    context.fillStyle = "#6f6559";
+    context.font = "14px Segoe UI";
+    context.textAlign = "center";
+    context.fillText(emptyMessage, width / 2, height / 2);
+    context.textAlign = "start";
     return;
   }
 
-  const padding = { left: 90, right: 20, top: 20, bottom: 24 };
+  const padding = { left: 90, right: 20, top: 20, bottom: 34 };
   const rows = selectedNodes.length;
   const columns = pointMask.length;
   const cellWidth = (width - padding.left - padding.right) / Math.max(1, columns);
   const cellHeight = (height - padding.top - padding.bottom) / Math.max(1, rows);
   selectedNodes.forEach((node, rowIndex) => {
     context.fillStyle = "#1e1a16";
+    context.font = "12px Segoe UI";
     context.fillText(`${t("common.node")} ${node}`, 16, padding.top + rowIndex * cellHeight + cellHeight * 0.7);
     for (let column = 0; column < columns; column += 1) {
-      context.fillStyle = pointMask[column][node] ? "#b55232" : "#f3ebe0";
+      context.fillStyle = pointMask[column]?.[node] ? "#b55232" : "#f3ebe0";
       context.fillRect(padding.left + column * cellWidth, padding.top + rowIndex * cellHeight, Math.max(1, cellWidth), Math.max(1, cellHeight - 1));
     }
   });
+  context.fillStyle = "#6f6559";
+  context.font = "12px Segoe UI";
+  context.fillText(`t=${Math.max(0, xStart)}`, padding.left, height - 10);
+  const endLabel = `t=${Math.max(xStart, xEnd - 1)}`;
+  const endWidth = context.measureText(endLabel).width;
+  context.fillText(endLabel, Math.max(padding.left + 20, width - padding.right - endWidth), height - 10);
 }
 
 function drawDag(svg, parents, topoOrder, selectedNodes) {
@@ -1682,7 +2112,7 @@ function drawDag(svg, parents, topoOrder, selectedNodes) {
     circle.setAttribute("cx", x);
     circle.setAttribute("cy", y);
     circle.setAttribute("r", 20);
-    circle.setAttribute("fill", selectedNodes.includes(node) ? "#b55232" : "#28536b");
+    circle.setAttribute("fill", selectedNodes.includes(node) ? getNodeColor(node) : "#8e857a");
     circle.setAttribute("stroke", "#1e1a16");
     circle.setAttribute("stroke-width", "1.5");
     svg.appendChild(circle);
@@ -1700,15 +2130,17 @@ function drawDag(svg, parents, topoOrder, selectedNodes) {
 }
 
 function clearCanvas(canvas) {
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
+  const { context, width, height } = prepareCanvas2d(canvas);
+  context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillRect(0, 0, width, height);
 }
 
 function clearPreview() {
   state.preview = null;
   state.selectedNodes = [];
+  state.hoveredEventIndex = null;
+  state.pinnedEventIndex = null;
   dom.summaryChips.innerHTML = "";
   dom.datasetSelect.innerHTML = "";
   renderEmptyDatasetHint();
@@ -2119,7 +2551,7 @@ const zhOverrides = {
   "workbench.previewGenerate": "生成预览画廊",
   "workbench.generationRail": "数据流程",
   "workbench.generateTitle": "生成并打包数据集",
-  "workbench.generateSubtitle": "将当前配置写为运行配置，生成多 split 数据并打包，同时产出训练配置。",
+  "workbench.generateSubtitle": "将当前配置写为运行配置，并行生成 train/val/test 三个 split，随后完成打包并产出训练配置。",
   "workbench.runName": "运行名称",
   "workbench.trainSamples": "训练样本数",
   "workbench.valSamples": "验证样本数",
@@ -2147,7 +2579,7 @@ const zhOverrides = {
   "workbench.stride": "窗口步长",
   "workbench.patchSize": "Patch 大小",
   "workbench.windowIndex": "窗口索引",
-  "workbench.windowRuleHint": "仅使用不重叠的完整窗口。尾部不足一窗的数据和短样本会被直接丢弃。",
+  "workbench.windowRuleHint": "按当前窗口步长切窗；尾部不足一窗和短样本都会保留，并在右侧补齐到 context_size。",
   "workbench.loadSamples": "加载样本",
   "workbench.previewPackedSample": "预览样本切片",
   "workbench.previewWindow": "预览窗口",
@@ -2166,11 +2598,11 @@ const zhOverrides = {
   "workbench.startTraining": "开始训练",
   "workbench.refreshTraining": "刷新指标",
   "workbench.lossCanvasTitle": "损失曲线",
-  "workbench.metricCanvasTitle": "验证曲线",
+  "workbench.metricCanvasTitle": "质量曲线",
   "workbench.calibrationCanvasTitle": "行为与校准",
-  "workbench.lossCanvasHint": "把总损失、异常损失和重建损失放在一起跟踪。",
-  "workbench.metricCanvasHint": "不用等最终总结，训练中就能看到检测质量的变化。",
-  "workbench.calibrationCanvasHint": "对比目标正例占比、预测正例占比、阈值和掩码使用情况。",
+  "workbench.lossCanvasHint": "把总损失、patch 异常损失、点级辅助损失和重建损失放在一起跟踪。",
+  "workbench.metricCanvasHint": "不用等最终总结，训练中就能同时看到 patch 级和点级质量变化。",
+  "workbench.calibrationCanvasHint": "同时对比 patch / 点级正例占比、阈值和掩码使用情况。",
   "workbench.trainingProgressEyebrow": "实时进度",
   "workbench.trainingProgressTitle": "当前运行",
   "workbench.trainingDetailsTitle": "训练原始明细",
@@ -2179,6 +2611,7 @@ const zhOverrides = {
   "workbench.kpi.monitor": "最佳监控指标",
   "workbench.kpi.trainLoss": "训练总损失",
   "workbench.kpi.valQuality": "最新验证信号",
+  "workbench.kpi.pointHead": "观测空间辅助头",
   "workbench.kpi.learningRate": "学习率",
   "workbench.kpi.balance": "正例占比偏差",
   "workbench.kpi.runtime": "已耗时 / 预计剩余",
@@ -2207,6 +2640,10 @@ const zhOverrides = {
   "workbench.label.window": "\u7a97\u53e3",
   "workbench.label.effective": "\u6709\u6548\u957f\u5ea6",
   "workbench.label.patches": "Patch \u6570",
+  "workbench.label.padded": "\u8865\u9f50",
+  "workbench.label.validPatches": "\u6709\u6548 Patch",
+  "workbench.label.tail": "\u5c3e\u7a97",
+  "workbench.label.short": "\u77ed\u6837\u672c",
   "workbench.label.job": "\u4efb\u52a1",
   "workbench.label.status": "\u72b6\u6001",
   "workbench.label.started": "\u5f00\u59cb",
@@ -2468,6 +2905,8 @@ async function loadPreviewById(previewId) {
     const payload = await fetchJson(`/api/preview-item?preview_id=${encodeURIComponent(previewId)}`);
     workbenchState.activePreviewId = previewId;
     state.preview = payload.preview;
+    state.hoveredEventIndex = null;
+    state.pinnedEventIndex = null;
     state.selectedNodes = Array.from(
       { length: Math.min(Number(dom.maxNodesSelect.value || 6), Number(state.preview?.summary?.num_series || 0)) },
       (_, index) => index,
@@ -2481,12 +2920,29 @@ async function loadPreviewById(previewId) {
 }
 
 function collectGenerationPayload() {
+  const defaults = workbenchState.bootstrap.generation_defaults ?? {};
   return {
     config: state.config,
     run_name: workbenchDom.runName.value.trim(),
     train_samples: Number(workbenchDom.trainSamples.value || 10000),
     val_samples: Number(workbenchDom.valSamples.value || 1500),
     test_samples: Number(workbenchDom.testSamples.value || 1500),
+    direct_pack: defaults.direct_pack ?? true,
+    window_pack: defaults.window_pack ?? false,
+    direct_window_pack: defaults.direct_window_pack ?? true,
+    window_context_size: Number(defaults.window_context_size ?? 1024),
+    window_patch_size: Number(defaults.window_patch_size ?? 16),
+    window_stride: defaults.window_stride ?? 1024,
+    window_windows_per_shard: Number(defaults.window_windows_per_shard ?? 4096),
+    window_include_tail: defaults.window_include_tail ?? true,
+    window_pad_short_sequences: defaults.window_pad_short_sequences ?? true,
+    window_debug_sidecar: defaults.window_debug_sidecar ?? false,
+    window_train_min_patch_positive_ratio: (
+      defaults.window_train_min_patch_positive_ratio ?? null
+    ),
+    window_train_min_anomaly_point_ratio: (
+      defaults.window_train_min_anomaly_point_ratio ?? null
+    ),
     samples_per_shard: Number(workbenchDom.samplesPerShard.value || 128),
     seed_base: Number(workbenchDom.seedBase.value || state.config.seed || 0),
     train_template: workbenchDom.trainTemplate.value,
@@ -2609,9 +3065,7 @@ async function previewPackedSample() {
     workbenchState.currentWindow = null;
     workbenchState.activeInspector = "sample";
     renderWorkbenchInspectorState();
-    clearCanvas(workbenchDom.windowCanvas);
-    clearCanvas(workbenchDom.patchCanvas);
-    drawSeriesPairChart(workbenchDom.sampleCanvas, payload.series_feature ?? [], payload.normal_series_feature ?? [], payload.point_mask_feature ?? [], []);
+    renderWorkbenchVisuals();
     workbenchDom.datasetJson.textContent = safeJson(payload);
     setStatus(t("workbench.sampleLoaded"), "ok");
   } catch (error) {
@@ -2655,8 +3109,7 @@ async function previewPackedWindow() {
     workbenchState.currentWindow = payload;
     workbenchState.activeInspector = "window";
     renderWorkbenchInspectorState();
-    drawSeriesPairChart(workbenchDom.windowCanvas, payload.series_feature ?? [], payload.normal_series_feature ?? [], payload.point_mask_feature ?? [], payload.padding_mask ?? []);
-    drawPatchBarChart(workbenchDom.patchCanvas, payload.patch_labels ?? []);
+    renderWorkbenchVisuals();
     workbenchDom.datasetJson.textContent = safeJson(payload);
     setStatus(t("workbench.windowLoaded"), "ok");
   } catch (error) {
@@ -2665,23 +3118,50 @@ async function previewPackedWindow() {
 }
 
 function buildSampleStats(payload) {
-  return [
+  const stats = [
     payload.sample_id,
     `${t("workbench.label.length")} ${payload.length}`,
     `${t("workbench.label.feature")} ${payload.feature_index}`,
     `${t("workbench.label.ratio")} ${formatMetric(payload.anomaly_ratio_feature)}`,
     `${t("workbench.label.windows")} ${payload.windowing?.num_windows ?? 0}`,
   ];
+  if ((payload.windowing?.padded_window_count ?? 0) > 0) {
+    stats.push(`${t("workbench.label.padded")} ${payload.windowing.padded_window_count}`);
+  }
+  if ((payload.windowing?.tail_window_count ?? 0) > 0) {
+    stats.push(`${t("workbench.label.tail")} ${payload.windowing.tail_window_count}`);
+  }
+  if ((payload.windowing?.short_window_count ?? 0) > 0) {
+    stats.push(`${t("workbench.label.short")} ${payload.windowing.short_window_count}`);
+  }
+  return stats;
 }
 
 function buildWindowStats(payload) {
-  return [
+  const totalPatches = payload.total_patch_count ?? payload.patch_labels?.length ?? 0;
+  const stats = [
     payload.sample_id,
     `${t("workbench.label.window")} ${payload.window_index}`,
     `[${payload.start}, ${payload.end})`,
     `${t("workbench.label.effective")} ${payload.effective_length}`,
-    `${t("workbench.label.patches")} ${payload.patch_labels?.length ?? 0}`,
+    `${t("workbench.label.patches")} ${totalPatches}`,
   ];
+  if ((payload.padded_steps ?? 0) > 0) {
+    stats.push(`${t("workbench.label.padded")} ${payload.padded_steps}`);
+  }
+  if (
+    typeof payload.valid_patch_count === "number"
+    && totalPatches > 0
+    && payload.valid_patch_count < totalPatches
+  ) {
+    stats.push(`${t("workbench.label.validPatches")} ${payload.valid_patch_count}/${totalPatches}`);
+  }
+  if (payload.is_short_window) {
+    stats.push(t("workbench.label.short"));
+  } else if (payload.is_tail_window) {
+    stats.push(t("workbench.label.tail"));
+  }
+  return stats;
 }
 
 function renderSampleStats(values) {
@@ -2691,6 +3171,7 @@ function renderSampleStats(values) {
 }
 
 function resetTrainingMonitor() {
+  stopPolling("train");
   workbenchState.trainingJob = null;
   workbenchState.trainingMetrics = null;
   workbenchDom.trainingStatus.innerHTML = "";
@@ -2819,7 +3300,7 @@ function buildTrainingKpiCards(progress, kpis) {
     progress?.split === "train" ? currentSplitMetrics.total_loss : null,
     latestTrain.total_loss,
   );
-  const qualityMetricName = pickPreferredMetricName(latestVal, ["f1", "pr_auc", "precision", "recall", "patch_accuracy", "total_loss"]);
+  const qualityMetricName = pickPreferredMetricName(latestVal, ["f1", "pr_auc", "precision", "recall", "patch_accuracy", "point_accuracy", "total_loss"]);
   const qualityMetricValue = qualityMetricName ? latestVal?.[qualityMetricName] : null;
   const predictedPositiveRate = firstDefinedMetric(
     progress?.split === "train" ? currentSplitMetrics.predicted_positive_rate : null,
@@ -2834,6 +3315,26 @@ function buildTrainingKpiCards(progress, kpis) {
   const thresholdValue = firstDefinedMetric(
     currentSplitMetrics.threshold,
     latestVal.threshold,
+  );
+  const pointAccuracy = firstDefinedMetric(
+    currentSplitMetrics.point_accuracy,
+    latestVal.point_accuracy,
+    latestTrain.point_accuracy,
+  );
+  const pointLoss = firstDefinedMetric(
+    currentSplitMetrics.point_anomaly_loss,
+    latestTrain.point_anomaly_loss,
+    latestVal.point_anomaly_loss,
+  );
+  const pointPredictedPositiveRate = firstDefinedMetric(
+    currentSplitMetrics.point_predicted_positive_rate,
+    latestTrain.point_predicted_positive_rate,
+    latestVal.point_predicted_positive_rate,
+  );
+  const pointTargetPositiveRate = firstDefinedMetric(
+    currentSplitMetrics.point_target_positive_rate,
+    latestTrain.point_target_positive_rate,
+    latestVal.point_target_positive_rate,
   );
 
   const cards = [
@@ -2860,8 +3361,21 @@ function buildTrainingKpiCards(progress, kpis) {
     qualityMetricName
       ? {
           label: `${t("workbench.kpi.valQuality")} (${formatMetricLabel(qualityMetricName)})`,
-          value: formatMetric(qualityMetricValue),
+          value: qualityMetricName.includes("accuracy") ? formatPercent(qualityMetricValue) : formatMetric(qualityMetricValue),
           note: buildValidationQualityNote(latestVal),
+          tone: "blue",
+        }
+      : null,
+    pointAccuracy != null || pointLoss != null
+      ? {
+          label: t("workbench.kpi.pointHead"),
+          value: pointAccuracy != null ? formatPercent(pointAccuracy) : formatMetric(pointLoss),
+          note: buildPointAuxNote({
+            point_anomaly_loss: pointLoss,
+            point_accuracy: pointAccuracy,
+            point_predicted_positive_rate: pointPredictedPositiveRate,
+            point_target_positive_rate: pointTargetPositiveRate,
+          }),
           tone: "blue",
         }
       : null,
@@ -2913,6 +3427,12 @@ function buildTrainLossNote(metrics) {
   if (typeof metrics.patch_accuracy === "number") {
     parts.push(`${formatMetricLabel("patch_accuracy")} ${formatPercent(metrics.patch_accuracy)}`);
   }
+  if (typeof metrics.point_anomaly_loss === "number") {
+    parts.push(`${formatMetricLabel("point_anomaly_loss")} ${formatMetric(metrics.point_anomaly_loss)}`);
+  }
+  if (typeof metrics.point_accuracy === "number") {
+    parts.push(`${formatMetricLabel("point_accuracy")} ${formatPercent(metrics.point_accuracy)}`);
+  }
   return parts.join(" · ") || localizeText("Train metrics are accumulating.", "训练指标正在累积。");
 }
 
@@ -2921,6 +3441,9 @@ function buildValidationQualityNote(metrics) {
     return localizeText("Validation has not finished yet.", "验证还没有结束。");
   }
   const parts = [];
+  if (typeof metrics.patch_accuracy === "number") {
+    parts.push(`${formatMetricLabel("patch_accuracy")} ${formatPercent(metrics.patch_accuracy)}`);
+  }
   if (typeof metrics.precision === "number") {
     parts.push(`${formatMetricLabel("precision")} ${formatMetric(metrics.precision)}`);
   }
@@ -2930,7 +3453,32 @@ function buildValidationQualityNote(metrics) {
   if (typeof metrics.pr_auc === "number") {
     parts.push(`${formatMetricLabel("pr_auc")} ${formatMetric(metrics.pr_auc)}`);
   }
+  if (typeof metrics.point_accuracy === "number") {
+    parts.push(`${formatMetricLabel("point_accuracy")} ${formatPercent(metrics.point_accuracy)}`);
+  }
   return parts.join(" · ") || localizeText("Only the latest validation snapshot is available.", "当前只拿到了最新一份验证快照。");
+}
+
+function buildPointAuxNote(metrics) {
+  if (!metrics || typeof metrics !== "object") {
+    return localizeText("Observation-space metrics are accumulating.", "观测空间辅助指标正在累积。");
+  }
+  const parts = [];
+  if (typeof metrics.point_anomaly_loss === "number") {
+    parts.push(`${formatMetricLabel("point_anomaly_loss")} ${formatMetric(metrics.point_anomaly_loss)}`);
+  }
+  if (typeof metrics.point_accuracy === "number") {
+    parts.push(`${formatMetricLabel("point_accuracy")} ${formatPercent(metrics.point_accuracy)}`);
+  }
+  if (
+    typeof metrics.point_predicted_positive_rate === "number"
+    && typeof metrics.point_target_positive_rate === "number"
+  ) {
+    parts.push(
+      `${localizeText("pred", "预测")} ${formatPercent(metrics.point_predicted_positive_rate)} · ${localizeText("target", "目标")} ${formatPercent(metrics.point_target_positive_rate)}`,
+    );
+  }
+  return parts.join(" · ") || localizeText("Observation-space metrics are accumulating.", "观测空间辅助指标正在累积。");
 }
 
 function renderTrainingCharts(metricsPayload) {
@@ -2972,6 +3520,18 @@ function renderTrainingChart(canvas, legendContainer, historyView, metricNames) 
   );
 }
 
+function stopPolling(kind) {
+  const pollState = workbenchState.polling[kind];
+  if (!pollState) {
+    return;
+  }
+  pollState.disposed = true;
+  if (pollState.timerId) {
+    window.clearTimeout(pollState.timerId);
+  }
+  workbenchState.polling[kind] = null;
+}
+
 async function startTrainingJob() {
   const configPath = workbenchDom.trainConfigPath.value.trim();
   if (!configPath) {
@@ -2996,12 +3556,25 @@ async function startTrainingJob() {
 }
 
 function pollJob(kind, jobId) {
-  if (workbenchState.polling[kind]) {
-    window.clearInterval(workbenchState.polling[kind]);
-  }
+  stopPolling(kind);
+  const pollState = {
+    disposed: false,
+    inFlight: false,
+    timerId: null,
+    jobId,
+  };
+  workbenchState.polling[kind] = pollState;
   const tick = async () => {
+    if (pollState.disposed || pollState.inFlight) {
+      return;
+    }
+    pollState.inFlight = true;
+    let shouldContinue = true;
     try {
       const payload = await fetchJson(`/api/job?job_id=${encodeURIComponent(jobId)}`);
+      if (pollState.disposed || workbenchState.polling[kind] !== pollState) {
+        return;
+      }
       if (kind === "generate") {
         workbenchDom.runSummary.textContent = safeJson(payload.result ?? { status: payload.status, logs: payload.logs?.slice(-30) ?? [] });
       } else if (kind === "train") {
@@ -3014,8 +3587,7 @@ function pollJob(kind, jobId) {
         }
       }
       if (payload.status === "completed") {
-        window.clearInterval(workbenchState.polling[kind]);
-        workbenchState.polling[kind] = null;
+        shouldContinue = false;
         if (kind === "generate" && payload.result) {
           applyRunInfo(payload.result);
         }
@@ -3025,17 +3597,25 @@ function pollJob(kind, jobId) {
         }
       }
       if (payload.status === "failed") {
-        window.clearInterval(workbenchState.polling[kind]);
-        workbenchState.polling[kind] = null;
+        shouldContinue = false;
       }
     } catch (error) {
       if (kind === "train") {
         workbenchDom.trainingLog.textContent = String(error.message ?? error);
       }
+    } finally {
+      pollState.inFlight = false;
+      if (pollState.disposed || workbenchState.polling[kind] !== pollState) {
+        return;
+      }
+      if (shouldContinue) {
+        pollState.timerId = window.setTimeout(tick, 2000);
+      } else {
+        stopPolling(kind);
+      }
     }
   };
   tick();
-  workbenchState.polling[kind] = window.setInterval(tick, 2000);
 }
 
 function renderTrainingJob(job) {
@@ -3253,9 +3833,7 @@ function formatDuration(value) {
 }
 
 function drawSeriesPairChart(canvas, primary, reference, mask, paddingMask) {
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const { context, width, height } = prepareCanvas2d(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
@@ -3313,9 +3891,7 @@ function drawSimpleLine(context, values, padding, plotWidth, plotHeight, minValu
 }
 
 function drawPatchBarChart(canvas, patchLabels) {
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const { context, width, height } = prepareCanvas2d(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
@@ -3331,9 +3907,7 @@ function drawPatchBarChart(canvas, patchLabels) {
 }
 
 function drawMetricChart(canvas, epochs, seriesMap, metricNames) {
-  const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const { context, width, height } = prepareCanvas2d(canvas);
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);

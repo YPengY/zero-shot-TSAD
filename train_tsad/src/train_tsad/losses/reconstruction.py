@@ -25,6 +25,15 @@ class MaskedReconstructionLoss(nn.Module):
             return prediction.sum() * 0.0
         return F.mse_loss(masked_prediction, masked_target)
 
+    def _masked_full_mse(self, prediction: Tensor, target: Tensor, valid_mask: Tensor) -> Tensor:
+        """Compute MSE only on valid non-padding positions."""
+
+        valid_prediction = prediction[valid_mask]
+        valid_target = target[valid_mask]
+        if valid_prediction.numel() == 0:
+            return prediction.sum() * 0.0
+        return F.mse_loss(valid_prediction, valid_target)
+
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
         """Compute reconstruction loss and reconstruction-path diagnostics."""
 
@@ -41,6 +50,15 @@ class MaskedReconstructionLoss(nn.Module):
                 f"Got {tuple(prediction.shape)} vs {tuple(target.shape)}."
             )
 
+        valid_mask = batch.point_valid_mask
+        if valid_mask is not None:
+            if valid_mask.shape != prediction.shape:
+                raise ValueError(
+                    "`batch.point_valid_mask` must match reconstruction shape. "
+                    f"Got {tuple(valid_mask.shape)} vs {tuple(prediction.shape)}."
+                )
+            valid_mask = valid_mask.to(device=prediction.device, dtype=torch.bool)
+
         used_mask = False
         if batch.mask_indices is not None and self.use_mask_only:
             mask = batch.mask_indices.bool()
@@ -49,12 +67,18 @@ class MaskedReconstructionLoss(nn.Module):
                     "`batch.mask_indices` must match reconstruction shape. "
                     f"Got {tuple(mask.shape)} vs {tuple(prediction.shape)}."
                 )
+            if valid_mask is not None:
+                mask = torch.logical_and(mask, valid_mask)
             loss = self._masked_mse(prediction, target, mask)
             mask_fraction = mask.float().mean().item()
             used_mask = True
         else:
-            loss = F.mse_loss(prediction, target)
-            mask_fraction = 1.0
+            if valid_mask is not None:
+                loss = self._masked_full_mse(prediction, target, valid_mask)
+                mask_fraction = valid_mask.float().mean().item()
+            else:
+                loss = F.mse_loss(prediction, target)
+                mask_fraction = 1.0
 
         return LossOutput(
             loss=loss,

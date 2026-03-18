@@ -1,0 +1,536 @@
+{
+  "sequence_length": {
+    "min": 1024,
+    "max": 1024
+  },
+  "anomaly_sample_ratio": 0.85,
+  "weights": {
+    "seasonality_type": {
+      "none": 0.1,
+      "sine": 0.45,
+      "square": 0.1,
+      "triangle": 0.1,
+      "wavelet": 0.25
+    },
+    "trend_type": {
+      "keep_steady": 0.45,
+      "increase": 0.2,
+      "decrease": 0.2,
+      "multiple": 0.1,
+      "arima": 0.05
+    },
+    "noise_level": {
+      "almost_none": 0.15,
+      "low": 0.5,
+      "moderate": 0.3,
+      "high": 0.05
+    }
+  },
+  "stage1": {
+    "trend": {
+      "change_points": {
+        "min": 1,
+        "max": 2
+      },
+      "slope_scale": 0.006,
+      "arima_noise_scale": 0.03,
+      "arima": {
+        "coef_bound": 0.45
+      }
+    },
+    "seasonality": {
+      "atoms": {
+        "min": 1,
+        "max": 2
+      },
+      "amplitude": {
+        "min": 0.3,
+        "max": 1.2
+      },
+      "base_period": {
+        "low": {
+          "min": 64,
+          "max": 192
+        },
+        "high": {
+          "min": 12,
+          "max": 32
+        }
+      },
+      "wavelet": {
+        "scale": {
+          "min": 0.1,
+          "max": 0.28
+        },
+        "contrastive": {
+          "ratio": 0.15
+        }
+      }
+    },
+    "noise": {
+      "sigma": {
+        "almost_none": 0.005,
+        "low": 0.02,
+        "moderate": 0.05,
+        "high": 0.08
+      },
+      "volatility_windows": {
+        "min": 0,
+        "max": 1
+      },
+      "volatility_multiplier": {
+        "min": 0.05,
+        "max": 0.3
+      }
+    }
+  },
+  "causal": {
+    "edge_density": 0.08,
+    "max_lag": 6,
+    "a_i_bound": 0.4,
+    "bias_std": 0.02,
+    "b_ij_std": 0.18,
+    "alpha_i_min": 0.05,
+    "alpha_i_max": 0.25
+  },
+  "anomaly": {
+    "defaults": {
+      "min_gap": 16,
+      "max_events_per_1000_steps_per_node": 1.0
+    },
+    "local": {
+      "budget": {
+        "events_per_sample": {
+          "min": 3,
+          "max": 5
+        }
+      },
+      "defaults": {
+        "window_length": {
+          "min": 12,
+          "max": 48
+        },
+        "endogenous_p": 0.15
+      },
+      "type_weights": {
+        "upward_spike": 0.25,
+        "downward_spike": 0.25,
+        "continuous_upward_spikes": 0.15,
+        "continuous_downward_spikes": 0.15,
+        "wide_upward_spike": 1.0,
+        "wide_downward_spike": 1.0,
+        "outlier": 0.15,
+        "sudden_increase": 1.0,
+        "sudden_decrease": 1.0,
+        "convex_plateau": 0.9,
+        "concave_plateau": 0.9,
+        "rapid_rise_slow_decline": 0.7,
+        "slow_rise_rapid_decline": 0.6,
+        "rapid_decline_slow_rise": 0.6,
+        "slow_decline_rapid_rise": 0.7,
+        "decrease_after_upward_spike": 0.0,
+        "increase_after_downward_spike": 0.0,
+        "increase_after_upward_spike": 0.0,
+        "decrease_after_downward_spike": 0.0,
+        "shake": 0.1,
+        "plateau": 0.4
+      },
+      "per_type": {
+        "upward_spike": {
+          "window_length": {
+            "min": 5,
+            "max": 14
+          },
+          "amplitude": {
+            "min": 1.8,
+            "max": 4.0
+          },
+          "half_width": {
+            "min": 1,
+            "max": 3
+          }
+        },
+        "downward_spike": {
+          "window_length": {
+            "min": 5,
+            "max": 14
+          },
+          "amplitude": {
+            "min": 1.8,
+            "max": 4.0
+          },
+          "half_width": {
+            "min": 1,
+            "max": 3
+          }
+        },
+        "continuous_upward_spikes": {
+          "window_length": {
+            "min": 12,
+            "max": 28
+          },
+          "spike_count": {
+            "min": 2,
+            "max": 4
+          },
+          "stride": {
+            "min": 2,
+            "max": 6
+          },
+          "amplitude": {
+            "min": 1.4,
+            "max": 3.0
+          },
+          "half_width": {
+            "min": 1,
+            "max": 3
+          }
+        },
+        "continuous_downward_spikes": {
+          "window_length": {
+            "min": 12,
+            "max": 28
+          },
+          "spike_count": {
+            "min": 2,
+            "max": 4
+          },
+          "stride": {
+            "min": 2,
+            "max": 6
+          },
+          "amplitude": {
+            "min": 1.4,
+            "max": 3.0
+          },
+          "half_width": {
+            "min": 1,
+            "max": 3
+          }
+        },
+        "wide_upward_spike": {
+          "window_length": {
+            "min": 12,
+            "max": 36
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 4.0
+          },
+          "rise_length": {
+            "min": 2,
+            "max": 8
+          },
+          "fall_length": {
+            "min": 2,
+            "max": 8
+          }
+        },
+        "wide_downward_spike": {
+          "window_length": {
+            "min": 12,
+            "max": 36
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 4.0
+          },
+          "rise_length": {
+            "min": 2,
+            "max": 8
+          },
+          "fall_length": {
+            "min": 2,
+            "max": 8
+          }
+        },
+        "outlier": {
+          "amplitude": {
+            "min": -4.5,
+            "max": 4.5
+          },
+          "min_abs_amplitude": 1.2
+        },
+        "sudden_increase": {
+          "window_length": {
+            "min": 12,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "kappa": {
+            "min": 0.15,
+            "max": 0.45
+          }
+        },
+        "sudden_decrease": {
+          "window_length": {
+            "min": 12,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "kappa": {
+            "min": 0.15,
+            "max": 0.45
+          }
+        },
+        "convex_plateau": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.2,
+            "max": 3.0
+          }
+        },
+        "concave_plateau": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.2,
+            "max": 3.0
+          }
+        },
+        "plateau": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.2,
+            "max": 3.0
+          }
+        },
+        "rapid_rise_slow_decline": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "rapid_tau": {
+            "min": 1.0,
+            "max": 2.5
+          },
+          "slow_tau": {
+            "min": 5.0,
+            "max": 14.0
+          }
+        },
+        "slow_rise_rapid_decline": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "rapid_tau": {
+            "min": 1.0,
+            "max": 2.5
+          },
+          "slow_tau": {
+            "min": 5.0,
+            "max": 14.0
+          }
+        },
+        "rapid_decline_slow_rise": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "rapid_tau": {
+            "min": 1.0,
+            "max": 2.5
+          },
+          "slow_tau": {
+            "min": 5.0,
+            "max": 14.0
+          }
+        },
+        "slow_decline_rapid_rise": {
+          "window_length": {
+            "min": 16,
+            "max": 64
+          },
+          "amplitude": {
+            "min": 1.5,
+            "max": 3.5
+          },
+          "rapid_tau": {
+            "min": 1.0,
+            "max": 2.5
+          },
+          "slow_tau": {
+            "min": 5.0,
+            "max": 14.0
+          }
+        },
+        "decrease_after_upward_spike": {
+          "enabled": false
+        },
+        "increase_after_downward_spike": {
+          "enabled": false
+        },
+        "increase_after_upward_spike": {
+          "enabled": false
+        },
+        "decrease_after_downward_spike": {
+          "enabled": false
+        },
+        "shake": {
+          "window_length": {
+            "min": 16,
+            "max": 48
+          },
+          "amplitude": {
+            "min": 1.0,
+            "max": 2.4
+          },
+          "frequency": {
+            "min": 0.12,
+            "max": 0.28
+          }
+        }
+      }
+    },
+    "seasonal": {
+      "activation_p": 0.2,
+      "budget": {
+        "events_per_sample": {
+          "min": 1,
+          "max": 1
+        }
+      },
+      "defaults": {
+        "window_length": {
+          "min": 32,
+          "max": 128
+        },
+        "endogenous_p": 0.1
+      },
+      "type_weights": {
+        "waveform_inversion": 1.0,
+        "amplitude_scaling": 0.4,
+        "frequency_change": 0.9,
+        "phase_shift": 0.8,
+        "noise_injection": 0.5,
+        "waveform_change": 0.5,
+        "add_harmonic": 0.4,
+        "remove_harmonic": 0.0,
+        "modify_harmonic_phase": 0.5,
+        "modify_modulation_depth": 0.0,
+        "modify_modulation_frequency": 0.0,
+        "modify_modulation_phase": 0.0,
+        "pulse_shift": 0.4,
+        "pulse_width_modulation": 0.4,
+        "wavelet_family_change": 0.6,
+        "wavelet_scale_change": 0.7,
+        "wavelet_shift_change": 0.7,
+        "wavelet_amplitude_change": 0.7,
+        "add_wavelet": 0.4,
+        "remove_wavelet": 0.0
+      },
+      "per_type": {
+        "amplitude_scaling": {
+          "scale": {
+            "min": 0.2,
+            "max": 0.6
+          }
+        },
+        "frequency_change": {
+          "factor": {
+            "min": 1.3,
+            "max": 2.0
+          }
+        },
+        "phase_shift": {
+          "delta_phase": {
+            "min": 1.0,
+            "max": 3.2
+          }
+        },
+        "noise_injection": {
+          "noise_scale": {
+            "min": 0.6,
+            "max": 1.4
+          }
+        },
+        "add_harmonic": {
+          "amplitude_scale": {
+            "min": 0.6,
+            "max": 1.2
+          }
+        },
+        "modify_harmonic_phase": {
+          "delta_phase": {
+            "min": 1.0,
+            "max": 3.2
+          }
+        },
+        "modify_modulation_depth": {
+          "enabled": false
+        },
+        "modify_modulation_frequency": {
+          "enabled": false
+        },
+        "modify_modulation_phase": {
+          "enabled": false
+        },
+        "wavelet_scale_change": {
+          "factor": {
+            "min": 1.4,
+            "max": 2.2
+          }
+        },
+        "wavelet_shift_change": {
+          "delta_shift": {
+            "min": -0.45,
+            "max": 0.45
+          }
+        },
+        "wavelet_amplitude_change": {
+          "factor": {
+            "min": 0.25,
+            "max": 0.6
+          }
+        },
+        "add_wavelet": {
+          "period": {
+            "min": 12.0,
+            "max": 64.0
+          },
+          "amplitude": {
+            "min": 0.8,
+            "max": 1.6
+          },
+          "scale": {
+            "min": 0.1,
+            "max": 0.25
+          }
+        },
+        "remove_harmonic": {
+          "enabled": false
+        },
+        "remove_wavelet": {
+          "enabled": false
+        }
+      }
+    }
+  }
+}

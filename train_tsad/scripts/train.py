@@ -24,10 +24,12 @@ from train_tsad.data import (  # noqa: E402
     ContextWindowCollator,
     ContextWindowDataset,
     DataQualityInspector,
+    GroupedWindowSampler,
     RandomPatchMaskingTransform,
     ShardedSyntheticTsadDataset,
     SlidingContextWindowizer,
     SyntheticTsadDataset,
+    WindowShardedTsadDataset,
 )
 from train_tsad.losses import TimeRCDMultiTaskLoss  # noqa: E402
 from train_tsad.evaluation import PatchFeatureEvaluator, TimeRCDEvaluator  # noqa: E402
@@ -64,6 +66,27 @@ def _set_global_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _manifest_is_window_packed(manifest_path: Path | None) -> bool:
+    """Heuristic detection for window-packed manifests."""
+
+    if manifest_path is None or not manifest_path.exists():
+        return False
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        row_text = line.strip()
+        if not row_text:
+            continue
+        row = json.loads(row_text)
+        return (
+            isinstance(row, dict)
+            and "shard_npz_path" in row
+            and ("window_index" in row or "sample_index" in row)
+            and "context_start" in row
+            and "context_end" in row
+            and "valid_length" in row
+        )
+    return False
+
+
 def _build_raw_dataset(config: ExperimentConfig, *, split: str):
     """Create the raw dataset object for one split.
 
@@ -78,11 +101,29 @@ def _build_raw_dataset(config: ExperimentConfig, *, split: str):
     manifest_path = _resolve_path(manifest_path, base_dir=PROJECT_ROOT)
     manifest_value: Path | None = manifest_path if manifest_path.exists() else None
 
-    dataset_cls = ShardedSyntheticTsadDataset if config.data.use_sharded_dataset else SyntheticTsadDataset
-    return dataset_cls(
+    if config.data.use_sharded_dataset:
+        if _manifest_is_window_packed(manifest_value):
+            return WindowShardedTsadDataset(
+                root_dir=dataset_root,
+                split=split,
+                manifest_path=manifest_value,
+                max_cached_shards=config.data.max_cached_shards,
+            )
+        return ShardedSyntheticTsadDataset(
+            root_dir=dataset_root,
+            split=split,
+            manifest_path=manifest_value,
+            max_cached_shards=config.data.max_cached_shards,
+            load_normal_series=config.data.load_normal_series,
+            load_metadata=config.data.load_metadata,
+        )
+
+    return SyntheticTsadDataset(
         root_dir=dataset_root,
         split=split,
         manifest_path=manifest_value,
+        load_normal_series=config.data.load_normal_series,
+        load_metadata=config.data.load_metadata,
     )
 
 
@@ -97,19 +138,27 @@ def _build_window_loader(
     """Build window dataset + dataloader for train/validation.
 
     The function wires together:
-    - Strict full-window chunking (`SlidingContextWindowizer`)
+    - Configurable context windowization (`SlidingContextWindowizer`)
     - Optional patch masking (only when reconstruction loss is enabled)
-    - Batch collation into `Batch` tensors
+    - Batch collation with normalization/padding masks into `Batch` tensors
     """
 
-    windowizer = SlidingContextWindowizer(
-        context_size=config.data.context_size,
-        patch_size=config.data.patch_size,
-        stride=config.data.stride,
-        pad_short_sequences=config.data.pad_short_sequences,
-        include_tail=config.data.include_tail,
-    )
-    window_dataset = ContextWindowDataset(raw_dataset, windowizer)
+    is_prewindowed = bool(getattr(raw_dataset, "is_prewindowed", False))
+    if is_prewindowed:
+        window_dataset = raw_dataset
+    else:
+        windowizer = SlidingContextWindowizer(
+            context_size=config.data.context_size,
+            patch_size=config.data.patch_size,
+            stride=config.data.stride,
+            pad_short_sequences=config.data.pad_short_sequences,
+            include_tail=config.data.include_tail,
+        )
+        window_dataset = ContextWindowDataset(
+            raw_dataset,
+            windowizer,
+            enable_direct_window_read=config.data.enable_direct_window_read,
+        )
     masking_transform = None
     if (
         config.loss.reconstruction_loss_weight > 0.0
@@ -121,16 +170,33 @@ def _build_window_loader(
             mask_ratio=config.data.mask_ratio,
             seed=config.train.seed + seed_offset,
         )
+    sampler = None
+    effective_shuffle = False
+    if shuffle:
+        if config.data.shuffle_strategy == "global_window":
+            effective_shuffle = True
+        else:
+            blocks = window_dataset.grouped_blocks(config.data.shuffle_strategy)
+            split_seed_offset = 0 if split == config.data.split else 1
+            sampler = GroupedWindowSampler(
+                blocks,
+                seed=config.train.seed + split_seed_offset,
+            )
+
     loader = DataLoader(
         window_dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=effective_shuffle,
+        sampler=sampler,
         num_workers=config.data.num_workers,
         pin_memory=config.data.pin_memory,
         drop_last=config.data.drop_last if shuffle else False,
         collate_fn=ContextWindowCollator(
             include_reconstruction_targets=config.loss.reconstruction_loss_weight > 0.0,
             masking_transform=masking_transform,
+            patch_size=config.data.patch_size,
+            normalization_mode=config.data.normalization_mode,
+            normalization_eps=config.data.normalization_eps,
         ),
     )
     return window_dataset, loader
@@ -153,14 +219,25 @@ def _infer_fixed_num_features(*raw_datasets) -> int:
     for raw_dataset in raw_datasets:
         if raw_dataset is None:
             continue
+        sample_num_features_getter = getattr(raw_dataset, "sample_num_features", None)
+        sample_id_getter = getattr(raw_dataset, "sample_id", None)
         for index in range(len(raw_dataset)):
-            sample = raw_dataset[index]
-            feature_count = int(sample.series.shape[1])
+            if callable(sample_num_features_getter):
+                feature_count = int(sample_num_features_getter(index))
+                sample_id = (
+                    str(sample_id_getter(index))
+                    if callable(sample_id_getter)
+                    else f"sample_{index:06d}"
+                )
+            else:
+                sample = raw_dataset[index]
+                feature_count = int(sample.series.shape[1])
+                sample_id = str(sample.sample_id)
             feature_counts.add(feature_count)
             sample_counts_by_feature[feature_count] = sample_counts_by_feature.get(feature_count, 0) + 1
             example_ids = example_ids_by_feature.setdefault(feature_count, [])
             if len(example_ids) < 3:
-                example_ids.append(sample.sample_id)
+                example_ids.append(sample_id)
 
     if not feature_counts:
         raise FileNotFoundError("Could not infer the number of feature channels from the datasets.")
@@ -183,37 +260,103 @@ def _infer_fixed_num_features(*raw_datasets) -> int:
 def _estimate_patch_feature_label_stats(raw_dataset, *, config: ExperimentConfig) -> dict[str, float]:
     """Estimate train-time patch-feature label balance from the raw training split."""
 
-    windowizer = SlidingContextWindowizer(
-        context_size=config.data.context_size,
-        patch_size=config.data.patch_size,
-        stride=config.data.stride,
-        pad_short_sequences=config.data.pad_short_sequences,
-        include_tail=config.data.include_tail,
-    )
+    cached = config.extras.get("_cached_train_label_stats")
+    if isinstance(cached, dict) and "patch" in cached:
+        return dict(cached["patch"])
 
-    positive_units = 0
-    total_units = 0
-    num_windows = 0
-    for sample_index in range(len(raw_dataset)):
-        sample = raw_dataset[sample_index]
-        for window in windowizer.transform(sample):
-            patch_labels = np.asarray(window.patch_labels, dtype=np.uint8)
-            positive_units += int(patch_labels.sum())
-            total_units += int(patch_labels.size)
-            num_windows += 1
-
-    if total_units <= 0:
-        raise ValueError("Unable to estimate patch-feature statistics from an empty training split.")
-
-    negative_units = total_units - positive_units
-    positive_rate = positive_units / total_units
-    return {
-        "num_windows": float(num_windows),
-        "num_patch_feature_units": float(total_units),
-        "num_positive_patch_feature_units": float(positive_units),
-        "num_negative_patch_feature_units": float(negative_units),
-        "patch_feature_positive_rate": float(positive_rate),
+    patch_stats, point_stats = _estimate_combined_label_stats(raw_dataset, config=config)
+    config.extras["_cached_train_label_stats"] = {
+        "patch": patch_stats,
+        "point": point_stats,
     }
+    return patch_stats
+
+
+def _estimate_combined_label_stats(
+    raw_dataset,
+    *,
+    config: ExperimentConfig,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Estimate patch-feature and point-feature label balance in a single pass."""
+
+    patch_positive_units = 0
+    patch_total_units = 0
+    point_positive_units = 0
+    point_total_units = 0
+    num_windows = 0
+    is_prewindowed = bool(getattr(raw_dataset, "is_prewindowed", False))
+    if is_prewindowed:
+        window_iterable = (raw_dataset[index] for index in range(len(raw_dataset)))
+    else:
+        windowizer = SlidingContextWindowizer(
+            context_size=config.data.context_size,
+            patch_size=config.data.patch_size,
+            stride=config.data.stride,
+            pad_short_sequences=config.data.pad_short_sequences,
+            include_tail=config.data.include_tail,
+        )
+        window_iterable = (
+            window
+            for sample_index in range(len(raw_dataset))
+            for window in windowizer.transform(raw_dataset[sample_index])
+        )
+
+    for window in window_iterable:
+        patch_labels = np.asarray(window.patch_labels, dtype=np.uint8)
+        patch_positive_units += int(patch_labels.sum())
+        patch_total_units += int(patch_labels.size)
+
+        point_mask = np.asarray(window.point_mask, dtype=np.uint8)
+        if point_mask.ndim != 2:
+            raise ValueError(
+                "`window.point_mask` must have shape [W, D] for point anomaly statistics."
+            )
+        valid_length = max(0, int(window.context_end) - int(window.context_start))
+        valid_point_mask = point_mask[:valid_length]
+        point_positive_units += int(valid_point_mask.sum())
+        point_total_units += int(valid_point_mask.size)
+        num_windows += 1
+
+    if patch_total_units <= 0:
+        raise ValueError("Unable to estimate patch-feature statistics from an empty training split.")
+    if point_total_units <= 0:
+        raise ValueError("Unable to estimate point-feature statistics from an empty training split.")
+
+    patch_negative_units = patch_total_units - patch_positive_units
+    point_negative_units = point_total_units - point_positive_units
+    patch_positive_rate = patch_positive_units / patch_total_units
+    point_positive_rate = point_positive_units / point_total_units
+
+    patch_stats = {
+        "num_windows": float(num_windows),
+        "num_patch_feature_units": float(patch_total_units),
+        "num_positive_patch_feature_units": float(patch_positive_units),
+        "num_negative_patch_feature_units": float(patch_negative_units),
+        "patch_feature_positive_rate": float(patch_positive_rate),
+    }
+    point_stats = {
+        "num_windows": float(num_windows),
+        "num_point_feature_units": float(point_total_units),
+        "num_positive_point_feature_units": float(point_positive_units),
+        "num_negative_point_feature_units": float(point_negative_units),
+        "point_feature_positive_rate": float(point_positive_rate),
+    }
+    return patch_stats, point_stats
+
+
+def _estimate_point_feature_label_stats(raw_dataset, *, config: ExperimentConfig) -> dict[str, float]:
+    """Estimate train-time point-feature label balance after windowization and padding trim."""
+
+    cached = config.extras.get("_cached_train_label_stats")
+    if isinstance(cached, dict) and "point" in cached:
+        return dict(cached["point"])
+
+    patch_stats, point_stats = _estimate_combined_label_stats(raw_dataset, config=config)
+    config.extras["_cached_train_label_stats"] = {
+        "patch": patch_stats,
+        "point": point_stats,
+    }
+    return point_stats
 
 
 def _resolve_anomaly_pos_weight(
@@ -259,6 +402,55 @@ def _resolve_anomaly_pos_weight(
     config.loss.anomaly_pos_weight = resolved
     config.extras["resolved_anomaly_pos_weight"] = resolved
     print(f"Using configured anomaly_pos_weight={resolved:.6f}.")
+    return None
+
+
+def _resolve_point_anomaly_pos_weight(
+    config: ExperimentConfig,
+    *,
+    train_raw_dataset,
+) -> dict[str, float] | None:
+    """Resolve point anomaly pos_weight when point-level auxiliary supervision is enabled."""
+
+    if config.loss.point_anomaly_loss_weight <= 0.0:
+        return None
+
+    configured = config.loss.point_anomaly_pos_weight
+    if configured is None:
+        print(
+            "Point anomaly pos_weight is disabled (`null`). "
+            "Imbalanced point-feature supervision may still collapse to all-negative predictions."
+        )
+        return None
+    if isinstance(configured, str):
+        if configured != "auto":
+            raise ValueError(
+                "`loss.point_anomaly_pos_weight` must be a positive float, null, or `auto`."
+            )
+        stats = _estimate_point_feature_label_stats(train_raw_dataset, config=config)
+        positive_units = stats["num_positive_point_feature_units"]
+        negative_units = stats["num_negative_point_feature_units"]
+        if positive_units <= 0:
+            raise ValueError(
+                "Cannot auto-estimate `loss.point_anomaly_pos_weight` because the train split "
+                "contains zero positive point-feature labels."
+            )
+        resolved = float(negative_units / positive_units)
+        config.loss.point_anomaly_pos_weight = resolved
+        config.extras["train_point_feature_label_stats"] = stats
+        config.extras["resolved_point_anomaly_pos_weight"] = resolved
+        print(
+            "Auto point_anomaly_pos_weight resolved from train point-feature labels: "
+            f"pos_weight={resolved:.6f}, positive_rate={stats['point_feature_positive_rate']:.6f}, "
+            f"positives={int(positive_units)}, negatives={int(negative_units)}, "
+            f"windows={int(stats['num_windows'])}."
+        )
+        return stats
+
+    resolved = float(configured)
+    config.loss.point_anomaly_pos_weight = resolved
+    config.extras["resolved_point_anomaly_pos_weight"] = resolved
+    print(f"Using configured point_anomaly_pos_weight={resolved:.6f}.")
     return None
 
 
@@ -316,6 +508,13 @@ def _run_data_quality_inspection(
 ) -> None:
     """Run optional split-level data-quality diagnostics before model training."""
 
+    if bool(getattr(train_raw_dataset, "is_prewindowed", False)):
+        print(
+            "Skipping data quality inspection because the selected dataset is already window-packed. "
+            "Inspection currently expects raw sequence samples."
+        )
+        return
+
     datasets_by_split: dict[str, object] = {
         config.data.split: train_raw_dataset,
     }
@@ -368,7 +567,7 @@ def _run_data_quality_inspection(
 def parse_args() -> argparse.Namespace:
     """Parse train entrypoint CLI arguments."""
 
-    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_small.json"
+    default_config = TRAIN_TSAD_ROOT / "configs" / "timercd_pretrain_paper_aligned.json"
     parser = argparse.ArgumentParser(description="Train the paper-aligned TimeRCD model.")
     parser.add_argument(
         "--config",
@@ -454,6 +653,10 @@ def main() -> None:
         config,
         train_raw_dataset=train_raw_dataset,
     )
+    _resolve_point_anomaly_pos_weight(
+        config,
+        train_raw_dataset=train_raw_dataset,
+    )
 
     # Current model path assumes a fixed feature count across all samples.
     num_features = _infer_fixed_num_features(train_raw_dataset, val_raw_dataset)
@@ -489,6 +692,9 @@ def main() -> None:
         attention_dropout=config.model.attention_dropout,
         activation=config.model.activation,
         use_learned_positional_encoding=config.model.use_learned_positional_encoding,
+        use_shared_output_projection=config.model.use_shared_output_projection,
+        use_observation_space_anomaly_head=config.model.use_observation_space_anomaly_head,
+        anomaly_patch_aggregation=config.model.anomaly_patch_aggregation,
         use_reconstruction_head=config.loss.reconstruction_loss_weight > 0.0,
     )
     loss_fn = TimeRCDMultiTaskLoss.from_config(config.loss)
@@ -511,6 +717,8 @@ def main() -> None:
         gradient_clip_norm=config.train.gradient_clip_norm,
         gradient_accumulation_steps=config.train.gradient_accumulation_steps,
         log_every_n_steps=config.train.log_every_n_steps,
+        mixed_precision=config.train.mixed_precision,
+        progress_write_interval_seconds=config.train.progress_write_interval_seconds,
     )
     result = trainer.fit(
         train_loader=train_loader,
