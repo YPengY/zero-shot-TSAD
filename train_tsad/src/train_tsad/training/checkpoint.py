@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import torch
 from torch import nn
@@ -31,7 +31,7 @@ class CheckpointManager:
         model: nn.Module,
         optimizer: Optimizer,
         scheduler: LRScheduler | None,
-        metrics: dict[str, float],
+        metrics: Mapping[str, Any],
         config: dict[str, Any] | None = None,
     ) -> Path:
         """Serialize one checkpoint bundle to disk."""
@@ -55,7 +55,7 @@ class CheckpointManager:
         model: nn.Module,
         optimizer: Optimizer,
         scheduler: LRScheduler | None,
-        metrics: dict[str, float],
+        metrics: Mapping[str, Any],
         config: dict[str, Any] | None = None,
     ) -> Path:
         """Write/update the rolling latest checkpoint."""
@@ -77,7 +77,7 @@ class CheckpointManager:
         model: nn.Module,
         optimizer: Optimizer,
         scheduler: LRScheduler | None,
-        metrics: dict[str, float],
+        metrics: Mapping[str, Any],
         config: dict[str, Any] | None = None,
     ) -> Path:
         """Write/update the best-performing checkpoint."""

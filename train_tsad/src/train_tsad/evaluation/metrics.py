@@ -1,3 +1,10 @@
+"""Thresholded detection metrics and threshold-search helpers.
+
+These functions are intentionally dependency-light so both scripts and runtime
+evaluators can compute the same thresholded metrics without pulling in a full
+metrics framework.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -78,7 +85,12 @@ def find_best_threshold(
     metric: str = "f1",
     num_scan_thresholds: int = 256,
 ) -> dict[str, float]:
-    """Search the best threshold for the requested point-level metric."""
+    """Search the threshold that maximizes one thresholded metric.
+
+    The scan is performed over observed score values when they are few enough,
+    otherwise over a dense grid in `[0, 1]`. This keeps threshold search stable
+    without assuming access to external metric libraries.
+    """
 
     metric_name = metric.lower()
     if metric_name not in {"f1", "precision", "recall"}:
@@ -115,10 +127,11 @@ def compute_detection_metrics(
     threshold_search: bool = False,
     threshold_search_metric: str = "f1",
 ) -> dict[str, float]:
-    """Compute the full evaluation bundle used by script entrypoints.
+    """Compute the thresholded metric bundle used by evaluators.
 
-    Returns:
-        Dictionary containing thresholded metrics and PR-AUC statistics.
+    When `threshold_search=True`, the reported threshold-dependent metrics are
+    taken at the threshold that optimizes `threshold_search_metric`; otherwise
+    the provided fixed threshold is used as-is.
     """
 
     if threshold_search:

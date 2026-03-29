@@ -1,3 +1,5 @@
+"""Noise parameter sampling and realization for stage-1 baselines."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -8,6 +10,8 @@ from ..utils import weighted_choice
 
 
 def sample_noise_params(n: int, config: GeneratorConfig, rng: np.random.Generator) -> NoiseParams:
+    """Sample heteroscedastic noise parameters for one node."""
+
     noise_level = weighted_choice(rng, config.weights["noise_level"])
     sigma0 = float(config.stage1.noise_sigma[noise_level])
 
@@ -32,6 +36,8 @@ def sample_noise_params(n: int, config: GeneratorConfig, rng: np.random.Generato
 
 
 def render_noise(n: int, params: NoiseParams) -> np.ndarray:
+    """Render Gaussian noise with optional volatility windows."""
+
     sigma_t = np.full(n, float(params["sigma0"]), dtype=float)
     for win in params["volatility_windows"]:
         start = int(win["start"])
@@ -48,5 +54,7 @@ def sample_noise(
     config: GeneratorConfig,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, NoiseParams]:
+    """Convenience wrapper that samples parameters and renders noise."""
+
     params = sample_noise_params(n=n, config=config, rng=rng)
     return render_noise(n=n, params=params), params

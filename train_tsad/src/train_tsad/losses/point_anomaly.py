@@ -1,3 +1,10 @@
+"""Observation-space anomaly objective for the optional auxiliary head.
+
+This loss is only meaningful when the model predicts point-level logits and
+the batch still carries point masks after collation. It complements the main
+patch head by directly supervising the reconstructed observation grid.
+"""
+
 from __future__ import annotations
 
 from typing import cast
@@ -10,7 +17,7 @@ from ..interfaces import Batch, LossOutput, ModelOutput
 
 
 class PointAnomalyLoss(nn.Module):
-    """Binary point-feature anomaly loss for observation-space anomaly supervision."""
+    """Binary point-feature loss for the optional observation-space head."""
 
     def __init__(
         self,

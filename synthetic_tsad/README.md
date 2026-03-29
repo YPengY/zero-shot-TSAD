@@ -35,7 +35,7 @@ The workflow is parameter-first: it samples parameters first, then realizes fina
 - `src/synthtsad/anomaly/*`: Stage 3 modules.
 - `src/synthtsad/labeling/labeler.py`: Stage 4 labels.
 - `src/synthtsad/io/writer.py`: output writer.
-- `tests/test_*.py`: pytest unit, regression, and smoke tests.
+- `tests/test_*.py`: pytest smoke/regression coverage for stable config and CLI-adjacent paths.
 
 ## Environment Setup (Windows)
 
@@ -127,6 +127,7 @@ For each sample, two files are generated:
 ```
 
 If `.venv` is missing, run `powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1` first.
+For formatting + lint + type-check + tests in one pass, run `.\scripts\check_quality.ps1`.
 
 ## Quality Checks
 
@@ -139,13 +140,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1
 Run the staged quality gate:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\check_quality.ps1
-```
-
-Apply formatting and safe auto-fixes before re-running the gate:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\check_quality.ps1 -Fix
+.\scripts\check_quality.ps1
 ```
 
 Current scope:

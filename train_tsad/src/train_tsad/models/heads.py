@@ -1,3 +1,10 @@
+"""Prediction heads used by the TimeRCD encoder stack.
+
+The heads keep task-specific decoding separate from the shared encoder so
+training can mix patch-level anomaly detection, point-level anomaly decoding,
+and reconstruction without entangling those choices in the encoder itself.
+"""
+
 from __future__ import annotations
 
 from torch import Tensor, nn
@@ -17,7 +24,11 @@ def _reshape_token_grid(tokens: Tensor, *, num_patches: int, num_features: int) 
 
 
 class AnomalyHead(nn.Module):
-    """Predict per-patch anomaly logits for each feature channel."""
+    """Predict patch-level anomaly logits for each feature channel.
+
+    Each token corresponds to one `(patch, feature)` pair, so the head only
+    needs to reduce the embedding dimension and reshape back to `[B, N_patches, D]`.
+    """
 
     def __init__(self, *, d_model: int) -> None:
         """Initialize per-token binary anomaly predictor."""
@@ -36,7 +47,11 @@ class AnomalyHead(nn.Module):
 
 
 class ReconstructionHead(nn.Module):
-    """Reconstruct point-level contexts from encoded patch tokens."""
+    """Decode patch tokens back to observation-space values.
+
+    The reconstruction target lives at the point level, so each token expands
+    back into `patch_size` values for its feature channel.
+    """
 
     def __init__(self, *, d_model: int, patch_size: int) -> None:
         """Initialize patch-to-point reconstruction projector."""
@@ -64,7 +79,11 @@ class ReconstructionHead(nn.Module):
 
 
 class SharedOutputProjection(nn.Module):
-    """Shared output projection `W_s` applied before task-specific heads."""
+    """Shared projection applied before task-specific heads.
+
+    This matches the paper-style setup where multiple heads consume a common
+    projected representation instead of attaching directly to encoder outputs.
+    """
 
     def __init__(self, *, d_model: int) -> None:
         """Initialize the shared projection in token embedding space."""
@@ -129,7 +148,11 @@ class ProjectedReconstructionHead(nn.Module):
 
 
 class ObservationSpaceAnomalyHead(nn.Module):
-    """Project token embeddings back to point-level anomaly logits `[B, W, D]`."""
+    """Decode tokens into point-level anomaly logits.
+
+    This head is useful when supervision is naturally defined per timestep and
+    feature, while the transformer still operates over patch-feature tokens.
+    """
 
     def __init__(self, *, d_model: int, patch_size: int) -> None:
         """Initialize point-level anomaly projection with token normalization."""
@@ -157,7 +180,7 @@ class ObservationSpaceAnomalyHead(nn.Module):
 
 
 class ProjectedObservationSpaceAnomalyHead(nn.Module):
-    """Task-specific point-level anomaly projection used after the shared output layer."""
+    """Point-level anomaly head used after the shared output projection."""
 
     def __init__(self, *, d_model: int, patch_size: int) -> None:
         """Initialize point-level anomaly projection without extra normalization."""

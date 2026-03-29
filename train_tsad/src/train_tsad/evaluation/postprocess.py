@@ -1,3 +1,11 @@
+"""Score reduction and overlap aggregation for evaluation-time predictions.
+
+These helpers convert model outputs from window-local tensors back into
+sample-level score streams. They define how feature channels are reduced,
+how patch scores are expanded to points, and how overlapping windows are
+merged before thresholded metrics are computed.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -150,7 +158,12 @@ class _PatchFeatureSampleState:
 
 @dataclass(slots=True)
 class PatchFeatureAccumulator:
-    """Aggregate patch-feature scores back to absolute sample patch regions."""
+    """Aggregate window-local patch scores into absolute sample patch regions.
+
+    The accumulator keeps patch-feature units in absolute sample coordinates,
+    which is what allows the evaluator to report patch metrics consistently
+    even when the same region is visited by multiple overlapping windows.
+    """
 
     aggregation: str = "mean"
     sample_states: dict[str, _PatchFeatureSampleState] = field(default_factory=dict)
@@ -264,7 +277,12 @@ class PatchFeatureAccumulator:
 
 @dataclass(slots=True)
 class PointScoreAccumulator:
-    """Aggregate overlapping window scores back to a full sample timeline."""
+    """Aggregate overlapping window scores back to one point timeline.
+
+    This is the point-level analogue of `PatchFeatureAccumulator`: it merges
+    overlapping windows into one score per absolute time step and one boolean
+    target per point before metric computation.
+    """
 
     aggregation: str = "mean"
     score_buffer: np.ndarray = field(

@@ -1,3 +1,5 @@
+"""Trend sampling and rendering for stage-1 synthetic baselines."""
+
 from __future__ import annotations
 
 from typing import TypeGuard
@@ -24,6 +26,8 @@ def _is_arima_trend_params(params: TrendParams) -> TypeGuard[ArimaTrendParams]:
 def _piecewise_linear(
     t: np.ndarray, k0: float, k1: float, cps: np.ndarray, deltas: np.ndarray
 ) -> np.ndarray:
+    """Evaluate a linear trend with slope changes after each changepoint."""
+
     values = k0 + k1 * t.astype(float)
     for cp, delta in zip(cps, deltas, strict=True):
         values += delta * np.maximum(t - cp, 0)
@@ -70,6 +74,8 @@ def _simulate_differenced_arma(
     sigma: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
+    """Simulate the stationary differenced series used by ARIMA trends."""
+
     p = int(phi.size)
     q = int(theta.size)
     eps = rng.normal(0.0, sigma, size=n)
@@ -101,6 +107,8 @@ def _integrate_differences(diff_series: np.ndarray, d_order: int, base_level: fl
 
 
 def sample_trend_params(n: int, config: GeneratorConfig, rng: np.random.Generator) -> TrendParams:
+    """Sample one trend specification without realizing the final signal."""
+
     trend_type = weighted_choice(rng, config.weights["trend_type"])
     slope_scale = config.stage1.trend_slope_scale
 
@@ -161,6 +169,8 @@ def sample_trend_params(n: int, config: GeneratorConfig, rng: np.random.Generato
 
 
 def render_trend(t: np.ndarray, params: TrendParams) -> np.ndarray:
+    """Render a trend signal `[T]` from sampled trend parameters."""
+
     if _is_linear_trend_params(params):
         k0 = float(params["k0"])
         k1 = float(params["k1"])
@@ -197,5 +207,7 @@ def sample_trend(
     config: GeneratorConfig,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, TrendParams]:
+    """Convenience wrapper that samples parameters and renders the trend."""
+
     params = sample_trend_params(n=t.size, config=config, rng=rng)
     return render_trend(t=t, params=params), params

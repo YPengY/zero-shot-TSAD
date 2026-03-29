@@ -1,3 +1,5 @@
+"""Label construction from realized anomaly events."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -12,12 +14,19 @@ from ..interfaces import EventSummary, LabelPayload, Stage3EventRecord
 
 
 class LabelBuilder:
-    """Build labels from injected event regions and declared affected nodes."""
+    """Convert realized anomaly events into point-level training labels.
+
+    The builder does not infer anomalies from signal deltas. Instead it trusts
+    the realized event records emitted by injectors and turns them into the
+    stable label payload consumed by writers and downstream training code.
+    """
 
     def __init__(self, config: GeneratorConfig) -> None:
         self.config = config
 
     def _summarize_events(self, events: list[Stage3EventRecord]) -> EventSummary:
+        """Aggregate event counts into a compact inspection payload."""
+
         target_components: dict[str, int] = {}
         local = 0
         seasonal = 0
@@ -49,6 +58,20 @@ class LabelBuilder:
         graph: CausalGraph | None,
         causal_state: ARXState | None,
     ) -> LabelPayload:
+        """Build the final label payload for one generated sample.
+
+        Args:
+            x_normal: Reference signal before anomaly injection, shape `[T, D]`.
+            x_anom: Observed signal after anomaly injection, shape `[T, D]`.
+            events: Realized anomaly events with affected-node annotations.
+            graph: Optional causal graph associated with the sample.
+            causal_state: Optional latent ARX state associated with the sample.
+
+        Returns:
+            A label payload containing per-node masks, collapsed timestep masks,
+            event records, and root-cause attribution metadata.
+        """
+
         _ = graph
         _ = causal_state
         if x_normal.shape != x_anom.shape:

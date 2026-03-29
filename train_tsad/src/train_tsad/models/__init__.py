@@ -1,6 +1,11 @@
-"""Model building blocks for TimeRCD-style training."""
+"""Public model exports for TimeRCD-style training.
+
+The package is layered from patch/token encoders up to task heads and the
+assembled `TimeRCDModel`, with a thin factory for workflow-facing construction.
+"""
 
 from .encoder import TransformerEncoder
+from .factory import build_timercd_model
 from .heads import (
     AnomalyHead,
     ObservationSpaceAnomalyHead,
@@ -20,6 +25,7 @@ __all__ = [
     "ObservationSpaceAnomalyHead",
     "PatchEmbedding",
     "PatchEmbeddingOutput",
+    "build_timercd_model",
     "ProjectedAnomalyHead",
     "ProjectedObservationSpaceAnomalyHead",
     "ProjectedReconstructionHead",

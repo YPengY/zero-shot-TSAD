@@ -1,3 +1,5 @@
+"""Sampling and realization of local anomaly templates."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -40,6 +42,13 @@ SampledLocalTemplate: TypeAlias = tuple[int, int, LocalEventParams]
 
 @dataclass
 class AnomalyEvent:
+    """In-memory anomaly event used before writing serializable metadata.
+
+    The event tracks both the root-cause node (`node`) and the eventual
+    `affected_nodes` set so the pipeline can distinguish local placement from
+    downstream causal propagation.
+    """
+
     anomaly_type: str
     node: int
     t_start: int
@@ -52,6 +61,8 @@ class AnomalyEvent:
     target_component: str = "observed"
 
     def to_record(self) -> Stage3EventRecord:
+        """Return a fully serializable representation for metadata sidecars."""
+
         return {
             "anomaly_type": self.anomaly_type,
             "node": int(self.node),
@@ -67,6 +78,8 @@ class AnomalyEvent:
 
 
 class LocalAnomalyHandler:
+    """Strategy interface for one family of local anomaly templates."""
+
     def sample(
         self,
         injector: LocalAnomalyInjector,
@@ -75,6 +88,8 @@ class LocalAnomalyHandler:
         rng: np.random.Generator,
         spec: LocalTypeSpec,
     ) -> SampledLocalTemplate:
+        """Sample a placement window and event-specific parameters."""
+
         raise NotImplementedError
 
     def render(
@@ -86,6 +101,8 @@ class LocalAnomalyHandler:
         t_end: int,
         params: LocalEventParams,
     ) -> np.ndarray:
+        """Render an additive delta `[T]` for the sampled event."""
+
         raise NotImplementedError
 
 
@@ -582,7 +599,12 @@ class ShakeHandler(LocalAnomalyHandler):
 
 
 class LocalAnomalyInjector:
-    """Stage 3 local/change anomalies with parameter-first templates."""
+    """Sample and apply local anomaly templates to observed channels.
+
+    Local anomalies operate in the observation space. Endogenous events may be
+    injected before the causal ARX realization so they can propagate through
+    the graph; exogenous events are applied directly to the observed channel.
+    """
 
     def __init__(self, config: GeneratorConfig) -> None:
         self.config = config
@@ -840,6 +862,8 @@ class LocalAnomalyInjector:
         rng: np.random.Generator,
         graph=None,
     ) -> list[AnomalyEvent]:
+        """Sample local anomaly events without mutating any signal."""
+
         _ = graph
         if d <= 0:
             return []
@@ -908,6 +932,8 @@ class LocalAnomalyInjector:
         graph=None,
         causal_state=None,
     ) -> tuple[np.ndarray, list[AnomalyEvent]]:
+        """Apply realized local events to `x_normal` and return updated events."""
+
         _ = graph
         _ = causal_state
         x_anom = x_normal.copy()
@@ -924,6 +950,8 @@ class LocalAnomalyInjector:
         return x_anom, realized
 
     def render_event_delta(self, n: int, event: AnomalyEvent) -> np.ndarray:
+        """Render the additive perturbation for one already-sampled event."""
+
         if event.family != "local":
             raise ValueError(f"LocalAnomalyInjector received non-local event: {event.family}")
         local_params = cast(LocalEventParams, event.params)
@@ -942,6 +970,8 @@ class LocalAnomalyInjector:
         graph=None,
         causal_state=None,
     ) -> tuple[np.ndarray, list[AnomalyEvent]]:
+        """Sample local events and apply them in one convenience call."""
+
         sampled = self.sample_events(n=x_normal.shape[0], d=x_normal.shape[1], rng=rng, graph=graph)
         return self.apply_events(
             x_normal=x_normal, events=sampled, graph=graph, causal_state=causal_state

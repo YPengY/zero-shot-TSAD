@@ -1,3 +1,11 @@
+"""Top-level orchestration for synthetic dataset generation.
+
+The pipeline keeps generation explicitly staged: sample parameters first,
+realize deterministic and stochastic components second, inject anomalies
+third, then build labels and metadata for writing. This separation is what
+allows later inspection tools to reason about how each sample was produced.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,11 +33,11 @@ from .labeling.labeler import LabelBuilder
 
 
 class SyntheticGeneratorPipeline:
-    """Four-stage synthetic generator aligned with Appendix C.
+    """Coordinate staged synthetic generation from config to dataset writer.
 
-    This pipeline uses a parameter-first workflow:
-    1) sample generation parameters
-    2) realize final sequences from the sampled parameters
+    The pipeline owns cross-stage orchestration only. Component-specific
+    sampling and rendering live in the causal, component, anomaly, and labeling
+    modules so each stage remains testable in isolation.
     """
 
     def __init__(self, config: GeneratorConfig) -> None:
@@ -112,6 +120,13 @@ class SyntheticGeneratorPipeline:
         arx: ARXSystem,
         arx_params: ARXParams,
     ) -> None:
+        """Infer which observed nodes should be marked as affected.
+
+        Endogenous local events are injected before causal realization. Their
+        declared `affected_nodes` therefore has to be inferred from the ARX
+        linear response rather than assumed to be equal to the root-cause node.
+        """
+
         for event in events:
             if not bool(event.is_endogenous):
                 continue
@@ -153,6 +168,26 @@ class SyntheticGeneratorPipeline:
         window_min_patch_positive_ratio: float | None = None,
         window_min_anomaly_point_ratio: float | None = None,
     ) -> None:
+        """Generate configured samples and write them in the requested format.
+
+        Args:
+            output_dir: Destination directory for raw or packed dataset output.
+            compress_output: Whether plain-array writers should compress arrays.
+            direct_pack: Whether to write packed sample shards instead of loose files.
+            direct_window_pack: Whether to emit context windows directly.
+            split: Logical dataset split name recorded by the writer.
+            samples_per_shard: Sample count per shard for packed sample output.
+            window_context_size: Fixed context length for direct window packing.
+            window_patch_size: Patch width used when packing windows.
+            window_stride: Sliding-window stride. Defaults to the writer policy.
+            window_include_tail: Whether to keep the last partial stride window.
+            window_pad_short_sequences: Whether short sequences are padded to one window.
+            window_windows_per_shard: Window count per shard in direct window mode.
+            window_debug_sidecar: Whether to write additional inspection sidecars.
+            window_min_patch_positive_ratio: Optional label-based filter for packed windows.
+            window_min_anomaly_point_ratio: Optional point-level filter for packed windows.
+        """
+
         output_dir.mkdir(parents=True, exist_ok=True)
         target_split = split or "train"
         if direct_window_pack:
@@ -187,10 +222,8 @@ class SyntheticGeneratorPipeline:
                 n, d = self._sample_dimensions(rng)
                 t = np.arange(n, dtype=float)
 
-                # Stage 1 (parameter sampling only)
                 stage1_params = self._sample_stage1_params(n=n, d=d, rng=rng)
 
-                # Stage 2 (parameter sampling only)
                 if self.config.debug.enable_causal:
                     assert graph_sampler is not None
                     graph = graph_sampler.sample_graph(num_nodes=d, rng=rng)
@@ -203,7 +236,6 @@ class SyntheticGeneratorPipeline:
                     active_arx_params = None
                     arx_params = self._disabled_arx_params()
 
-                # Stage 3 (parameter/event sampling only)
                 sampled_local_events: list[AnomalyEvent] = []
                 sampled_seasonal_events: list[AnomalyEvent] = []
 
@@ -228,7 +260,6 @@ class SyntheticGeneratorPipeline:
                         event.is_endogenous = False
                         event.root_cause_node = None
 
-                # Realization from sampled parameters.
                 x_base = self._realize_stage1(t=t, stage1_params=stage1_params)
 
                 # Endogenous local events are injected before causal realization so they
@@ -290,7 +321,6 @@ class SyntheticGeneratorPipeline:
                     )
                     realized_events.extend(seasonal_events)
 
-                # Stage 4 labels
                 labels: LabelPayload = label_builder.build(
                     x_normal=x_normal,
                     x_anom=x_observed,

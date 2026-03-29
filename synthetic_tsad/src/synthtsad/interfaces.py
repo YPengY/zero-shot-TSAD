@@ -1,3 +1,11 @@
+"""Typed payloads shared across the synthetic generation pipeline.
+
+This module defines the stable schemas passed between parameter sampling,
+sequence realization, anomaly injection, and dataset writing. The goal is to
+keep each stage explicit without forcing downstream code to inspect arbitrary
+metadata dictionaries.
+"""
+
 from __future__ import annotations
 
 from typing import Literal, TypeAlias, TypedDict
@@ -107,6 +115,8 @@ SeasonalParams: TypeAlias = NoneSeasonalityParams | AtomicSeasonalityParams
 
 
 class Stage1NodeParams(TypedDict):
+    """Sampled stage-1 parameters for one observed node."""
+
     node: int
     trend: TrendParams
     seasonality: SeasonalParams
@@ -114,6 +124,12 @@ class Stage1NodeParams(TypedDict):
 
 
 class ARXParams(TypedDict):
+    """Parameterized causal dynamics used to mix baseline channels.
+
+    The dense matrices are stored in Python lists so they can be serialized
+    directly into metadata sidecars without a custom encoder.
+    """
+
     a: list[float]
     alpha: list[float]
     bias: list[float]
@@ -123,6 +139,8 @@ class ARXParams(TypedDict):
 
 
 class DisabledARXParams(TypedDict):
+    """Sentinel payload used when causal dynamics are disabled."""
+
     disabled: Literal[True]
 
 
@@ -451,6 +469,8 @@ EventFamily: TypeAlias = Literal["local", "seasonal"]
 
 
 class Stage3EventRecord(TypedDict):
+    """Serializable record for one sampled or realized anomaly event."""
+
     anomaly_type: str
     node: int
     t_start: int
@@ -485,6 +505,8 @@ class Stage3Metadata(TypedDict):
 
 
 class GenerationMetadata(TypedDict):
+    """Per-sample metadata grouped by generation stage."""
+
     sample: SampleRunMetadata
     stage1: Stage1Metadata
     stage2: Stage2Metadata
@@ -492,6 +514,8 @@ class GenerationMetadata(TypedDict):
 
 
 class EventSummary(TypedDict):
+    """High-level counts used for dataset inspection and debugging."""
+
     total: int
     local: int
     seasonal: int
@@ -500,6 +524,13 @@ class EventSummary(TypedDict):
 
 
 class LabelPayload(TypedDict):
+    """Point-level anomaly labels and causal attribution for one sample.
+
+    `point_mask` keeps per-node anomaly regions, while `point_mask_any` is the
+    collapsed sample-level view used by simpler consumers that only need to
+    know whether any node is anomalous at each timestep.
+    """
+
     point_mask: np.ndarray
     point_mask_any: np.ndarray
     events: list[Stage3EventRecord]

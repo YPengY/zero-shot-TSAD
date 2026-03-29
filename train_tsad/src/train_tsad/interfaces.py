@@ -1,3 +1,11 @@
+"""Core runtime data structures shared across data, model, loss, and eval.
+
+The training stack passes only a small set of typed objects between stages:
+raw samples, fixed windows, tensor batches, model outputs, and loss outputs.
+Keeping these contracts explicit is what allows the rest of the project to
+stay modular.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace

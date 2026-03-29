@@ -1,3 +1,11 @@
+"""Runtime evaluators that turn window predictions into detection metrics.
+
+The evaluator layer sits after the model but before reporting scripts. It is
+responsible for reducing feature-wise scores, reconciling overlapping windows,
+and deciding whether threshold search or a fixed threshold should be used when
+reporting metrics.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -45,7 +53,12 @@ def _compute_group_metrics(
 
 @dataclass(slots=True)
 class PatchFeatureEvaluator:
-    """Evaluate absolute sample patch regions for each feature channel."""
+    """Evaluate patch-feature predictions in absolute sample coordinates.
+
+    This evaluator preserves the feature dimension all the way through metric
+    computation. It is primarily useful for diagnosing the main anomaly head
+    before patch scores are reduced to point-level signals.
+    """
 
     patch_size: int
     patch_feature_score_aggregation: str = "mean"
@@ -91,7 +104,11 @@ class PatchFeatureEvaluator:
             )
 
     def compute(self) -> dict[str, Any]:
-        """Finalize all patch-feature units and compute global/grouped metrics."""
+        """Finalize all patch-feature units and compute grouped metrics.
+
+        Threshold search, when enabled, is performed on the finalized absolute
+        patch-feature records rather than on per-window tensors.
+        """
 
         (
             sample_id_table,
@@ -145,7 +162,15 @@ class PatchFeatureEvaluator:
 
 @dataclass(slots=True)
 class TimeRCDEvaluator:
-    """Accumulate window predictions and compute point-level detection metrics."""
+    """Compute point-level detection metrics from overlapping training windows.
+
+    Depending on the model outputs available, this evaluator either:
+    - reduces point-head scores across features directly, or
+    - reduces patch-head scores and expands them back to points
+
+    In both cases, overlapping windows are merged back into one score stream
+    per sample before thresholded metrics are computed.
+    """
 
     patch_size: int
     score_reduction: str = "mean"

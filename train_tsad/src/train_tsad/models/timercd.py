@@ -1,3 +1,5 @@
+"""Reference TimeRCD model assembly used by the training workflows."""
+
 from __future__ import annotations
 
 import torch
@@ -19,7 +21,12 @@ from .positional_encoding import GridPositionalEncoding
 
 
 class TimeRCDModel(nn.Module):
-    """Paper-aligned dual-head model for synthetic TimeRCD pretraining."""
+    """Transformer-based model for patch anomaly detection and reconstruction.
+
+    The model owns representation learning and head wiring only. Loss
+    definitions, threshold selection, and training-loop behavior remain in the
+    dedicated training and evaluation modules.
+    """
 
     def __init__(
         self,
@@ -133,7 +140,13 @@ class TimeRCDModel(nn.Module):
         num_features: int,
         point_valid_mask: Tensor | None,
     ) -> Tensor:
-        """Reduce point-level anomaly logits back to patch logits for supervision."""
+        """Reduce point-level logits back to patch logits for loss computation.
+
+        Observation-space heads predict `[B, W, D]` logits, while the main
+        anomaly supervision is defined over patch labels `[B, N_patches, D]`.
+        This helper keeps that mapping explicit and controlled by a named
+        aggregation rule.
+        """
 
         if point_logits.ndim != 3:
             raise ValueError(
@@ -207,8 +220,10 @@ class TimeRCDModel(nn.Module):
             `batch.inputs` in shape `[B, W, D]`.
 
         Returns:
-            `ModelOutput` with patch logits `[B, N_patches, D]` and optional
-            reconstruction aligned to `batch.reconstruction_targets`.
+            `ModelOutput` containing:
+            - patch-level anomaly logits `[B, N_patches, D]`
+            - optional point-level anomaly logits `[B, W, D]`
+            - optional reconstruction aligned with `batch.reconstruction_targets`
         """
 
         # Apply point-level masking used by the reconstruction pretext task.

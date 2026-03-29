@@ -1,3 +1,5 @@
+"""Autoregressive causal mixing for synthetic multivariate sequences."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,18 +13,27 @@ from .dag import CausalGraph
 
 @dataclass
 class ARXState:
+    """Latent causal trajectory returned alongside observed channels."""
+
     z: np.ndarray  # latent causal channel, shape [T, D]
     params: ARXModelParams
 
 
 class ARXSystem:
-    """Stage 2.2-2.4: ODE-inspired ARX discretization and signal mixing."""
+    """Mix baseline components through a graph-constrained ARX system.
+
+    Stage 1 produces per-node baseline signals. The ARX stage turns those
+    independent channels into coupled observations by combining autoregressive
+    latent dynamics with graph-conditioned cross-node forcing terms.
+    """
 
     def __init__(self, config: GeneratorConfig, graph: CausalGraph) -> None:
         self.config = config
         self.graph = graph
 
     def sample_params(self, rng: np.random.Generator) -> ARXParams:
+        """Sample stable-enough causal parameters for the current graph."""
+
         d = self.graph.num_nodes
         c = self.config.causal
 
@@ -57,6 +68,17 @@ class ARXSystem:
         n_steps: int,
         params: ARXParams,
     ) -> tuple[np.ndarray, ARXState]:
+        """Realize observed channels from a baseline signal and sampled ARX params.
+
+        Args:
+            x_base: Baseline stage-1 signal with shape `[T, D]` or `[T]`.
+            n_steps: Maximum number of timesteps to simulate.
+            params: Serializable ARX parameter payload.
+
+        Returns:
+            Tuple of observed signal `[T, D]` and the latent causal state.
+        """
+
         if x_base.ndim == 1:
             x_base = np.tile(x_base[:, None], (1, self.graph.num_nodes))
 
@@ -95,6 +117,13 @@ class ARXSystem:
         n_steps: int,
         params: ARXParams,
     ) -> tuple[np.ndarray, ARXState]:
+        """Simulate only the linear response induced by a perturbation input.
+
+        This variant zeros the ARX bias term so downstream code can attribute
+        affected nodes to the injected perturbation rather than to the base
+        latent drift.
+        """
+
         linear_params: ARXParams = {
             "a": list(params["a"]),
             "alpha": list(params["alpha"]),
@@ -111,5 +140,7 @@ class ARXSystem:
         n_steps: int,
         rng: np.random.Generator,
     ) -> tuple[np.ndarray, ARXState]:
+        """Sample parameters and immediately realize the corresponding signal."""
+
         params = self.sample_params(rng)
         return self.simulate_with_params(x_base=x_base, n_steps=n_steps, params=params)

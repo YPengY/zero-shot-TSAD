@@ -1,3 +1,5 @@
+"""Sampling and realization of seasonal and contextual anomaly events."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -56,6 +58,8 @@ SampledSeasonalEvent: TypeAlias = SeasonalEventParams
 
 
 class SeasonalAnomalyHandler:
+    """Strategy interface for one family of seasonal anomaly transforms."""
+
     def sample(
         self,
         injector: SeasonalAnomalyInjector,
@@ -64,6 +68,8 @@ class SeasonalAnomalyHandler:
         rng: np.random.Generator,
         spec: SeasonalTypeSpec,
     ) -> SampledSeasonalEvent:
+        """Sample event parameters for an existing seasonal specification."""
+
         raise NotImplementedError
 
     def delta(
@@ -75,6 +81,8 @@ class SeasonalAnomalyHandler:
         event: AnomalyEvent,
         rng: np.random.Generator,
     ) -> np.ndarray:
+        """Render the additive delta induced by the seasonal event."""
+
         raise NotImplementedError
 
 
@@ -546,7 +554,12 @@ class WaveletTransformHandler(SeasonalAnomalyHandler):
 
 
 class SeasonalAnomalyInjector:
-    """Stage 3 seasonal/contextual anomalies over seasonal components."""
+    """Sample and apply anomalies that modify seasonal structure.
+
+    Seasonal anomalies operate on the stage-1 seasonal component of a node and
+    can optionally be propagated through the ARX graph when they are declared
+    endogenous.
+    """
 
     def __init__(self, config: GeneratorConfig) -> None:
         self.config = config
@@ -810,6 +823,8 @@ class SeasonalAnomalyInjector:
         rng: np.random.Generator,
         stage1_params: list[Stage1NodeParams] | None = None,
     ) -> list[AnomalyEvent]:
+        """Sample seasonal anomaly events without mutating the input signal."""
+
         seasonal_cfg = self._seasonal_config()
         if d == 0 or stage1_params is None or rng.random() > float(seasonal_cfg.activation_p):
             return []
@@ -895,6 +910,8 @@ class SeasonalAnomalyInjector:
         arx=None,
         arx_params: ARXParams | None = None,
     ) -> tuple[np.ndarray, list[AnomalyEvent]]:
+        """Apply seasonal anomaly events to an observed multivariate signal."""
+
         x_out = x_input.copy()
         realized: list[AnomalyEvent] = []
         n, d = x_out.shape
@@ -966,6 +983,8 @@ class SeasonalAnomalyInjector:
         arx=None,
         arx_params: ARXParams | None = None,
     ) -> tuple[np.ndarray, list[AnomalyEvent]]:
+        """Sample seasonal events and apply them in one convenience call."""
+
         sampled = self.sample_events(
             n=x_input.shape[0], d=x_input.shape[1], rng=rng, stage1_params=stage1_params
         )

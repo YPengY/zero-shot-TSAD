@@ -12,12 +12,17 @@ if (-not (Test-Path $pythonExe)) {
 
 Push-Location $projectRoot
 try {
+    $targets = @("src", "apps", "scripts")
+    if (Test-Path (Join-Path $projectRoot "tests")) {
+        $targets += "tests"
+    }
+
     if ($Fix) {
-        & $pythonExe -m ruff format src apps tests scripts
-        & $pythonExe -m ruff check --fix src apps tests scripts
+        & $pythonExe -m ruff format @targets
+        & $pythonExe -m ruff check --fix @targets
     } else {
-        & $pythonExe -m ruff format --check src apps tests scripts
-        & $pythonExe -m ruff check src apps tests scripts
+        & $pythonExe -m ruff format --check @targets
+        & $pythonExe -m ruff check @targets
     }
 
     & $pythonExe -m pyright

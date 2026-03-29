@@ -1,3 +1,5 @@
+"""Seasonality sampling and rendering for stage-1 synthetic baselines."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -103,6 +105,8 @@ def _wavelet_atom(
     shift: float,
     theta: dict[str, float],
 ) -> np.ndarray:
+    """Render a normalized wavelet atom over one wrapped cycle."""
+
     u = ((t / period) + phase / (2 * np.pi) - shift) % 1.0
     centered = u - 0.5
     z = centered / max(scale, 1e-4)
@@ -265,6 +269,8 @@ def _sample_contrastive_variant(
 def sample_seasonality_params(
     n: int, config: GeneratorConfig, rng: np.random.Generator
 ) -> SeasonalParams:
+    """Sample a seasonality specification without realizing the signal."""
+
     _ = n
     season_type = _sample_seasonality_type(config=config, rng=rng)
     if season_type == "none":
@@ -311,6 +317,8 @@ def sample_seasonality_params(
 
 
 def render_seasonality(t: np.ndarray, params: SeasonalParams) -> np.ndarray:
+    """Render a seasonal signal `[T]` from its atomized specification."""
+
     season_type = str(params["seasonality_type"])
     n = t.size
     if season_type == "none":
@@ -369,5 +377,7 @@ def sample_seasonality(
     config: GeneratorConfig,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, SeasonalParams]:
+    """Convenience wrapper that samples seasonality params and renders them."""
+
     params = sample_seasonality_params(n=t.size, config=config, rng=rng)
     return render_seasonality(t=t, params=params), params

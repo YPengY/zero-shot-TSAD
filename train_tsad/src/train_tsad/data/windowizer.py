@@ -1,3 +1,11 @@
+"""Window slicing utilities that bridge raw sequences and model supervision.
+
+The windowizer is the component that turns full sequences into fixed-size
+training examples. It is also where point-level anomaly masks are converted
+into patch-level labels, so this module defines the semantic boundary between
+raw labels and model-facing supervision.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -99,12 +107,15 @@ def _build_patch_labels(point_mask: np.ndarray, patch_size: int) -> np.ndarray:
 
 @dataclass(slots=True)
 class SlidingContextWindowizer(ContextWindowizerProtocol):
-    """Slice full sequences into fixed-size context windows.
+    """Slice full sequences into fixed-size, right-padded context windows.
 
-    Behavior is controlled by config:
-    - `stride` defines the start-step between consecutive windows
-    - `pad_short_sequences` keeps short samples as one padded window
-    - `include_tail` keeps the final short remainder as one padded window
+    This class owns three related decisions:
+    - how context bounds are enumerated from a full sequence
+    - how short/tail fragments are preserved through right-padding
+    - how point-level labels `[W, D]` are aggregated into patch labels
+
+    It intentionally does not batch samples or read files; those concerns stay
+    in the dataset and collator layers.
     """
 
     context_size: int
@@ -183,7 +194,12 @@ class SlidingContextWindowizer(ContextWindowizerProtocol):
         point_mask_any_window: np.ndarray | None = None,
         normal_series_window: np.ndarray | None = None,
     ) -> ContextWindowSample:
-        """Build one fixed-size context window from already-cropped arrays."""
+        """Build one model-facing window from already-cropped arrays.
+
+        The returned window always has padded shape `[context_size, D]`.
+        `context_end - context_start` records the valid unpadded prefix, which
+        later becomes `valid_lengths` and validity masks in the collator.
+        """
 
         series = _as_float32_2d(series_window, name="series_window")
         point_mask = _as_mask_2d(point_mask_window, name="point_mask_window")

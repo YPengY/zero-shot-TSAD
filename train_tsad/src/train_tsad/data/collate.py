@@ -1,3 +1,11 @@
+"""Batch assembly from window samples to model-ready tensors.
+
+This module is the last step in the data pipeline before the model sees any
+input. It is responsible for stacking aligned windows, preserving valid-length
+information for padded tails, and materializing the masks required by losses
+and attention layers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -143,11 +151,14 @@ def _normalize_series_array(
 
 @dataclass(slots=True)
 class ContextWindowCollator(CollatorProtocol):
-    """Convert fixed-size context windows into a model-ready tensor batch.
+    """Convert aligned context windows into one tensorized `Batch`.
 
-    This collator assumes the upstream windowizer has already aligned every
-    sample to the same `context_size` and `patch_size`. It only validates shape
-    consistency, stacks arrays, and converts them into torch tensors.
+    The collator does not decide how windows are cut; that responsibility stays
+    in the windowizer/dataset layer. Its job is to preserve the semantic
+    distinction between:
+    - padded vs. valid time steps
+    - point-level masks vs. patch-level labels
+    - reconstruction targets vs. masked model inputs
     """
 
     include_reconstruction_targets: bool = True
@@ -157,13 +168,12 @@ class ContextWindowCollator(CollatorProtocol):
     normalization_eps: float = 1e-5
 
     def __call__(self, samples: Sequence[ContextWindowSample]) -> Batch:
-        """Collate window samples into one `Batch`.
+        """Collate one batch of context windows.
 
-        Workflow:
-        1. Validate batch consistency (non-empty and single split).
-        2. Stack numpy arrays and convert to torch tensors.
-        3. Build optional reconstruction/masking targets.
-        4. Attach context bounds and shape metadata.
+        All input windows are expected to share the same padded shape
+        `[W, D]` and patch grid `[N_patches, D]`. The returned `Batch` keeps
+        both point-level and patch-level validity masks so later stages can
+        ignore right-padding without losing the original window geometry.
         """
 
         if not samples:

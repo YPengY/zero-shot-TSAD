@@ -1,3 +1,10 @@
+"""Composition of patch, point, and reconstruction training objectives.
+
+This module is the only place where the three supervision paths are combined
+into one scalar loss. Keeping the weighting logic centralized makes it easier
+to reason about which heads are active for a given run.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +14,7 @@ from torch import nn
 
 from ..config import LossConfig
 from ..interfaces import Batch, LossOutput, ModelOutput
-from .anomaly import PatchAnomalyLoss
+from .anomaly import PatchAnomalyLoss, PatchAsymmetricLoss
 from .point_anomaly import PointAnomalyLoss
 from .reconstruction import MaskedReconstructionLoss
 
@@ -38,7 +45,12 @@ def _resolve_pos_weight_config(
 
 
 class TimeRCDMultiTaskLoss(nn.Module):
-    """Combine patch anomaly loss and reconstruction loss with fixed weights."""
+    """Combine all enabled supervision heads into one scalar objective.
+
+    The patch anomaly head is always active. Point-level and reconstruction
+    terms are optional and are only evaluated when both their weights and the
+    required tensors are present.
+    """
 
     def __init__(
         self,
@@ -82,14 +94,24 @@ class TimeRCDMultiTaskLoss(nn.Module):
                 label_smoothing=config.label_smoothing,
             )
 
-        return cls(
-            anomaly_loss=PatchAnomalyLoss(
+        if config.anomaly_loss_type == "asl":
+            anomaly_loss = PatchAsymmetricLoss(
+                gamma_neg=config.anomaly_asl_gamma_neg,
+                gamma_pos=config.anomaly_asl_gamma_pos,
+                clip=config.anomaly_asl_clip,
+                label_smoothing=config.label_smoothing,
+            )
+        else:
+            anomaly_loss = PatchAnomalyLoss(
                 pos_weight=_resolve_pos_weight_config(
                     config.anomaly_pos_weight,
                     field_name="anomaly_pos_weight",
                 ),
                 label_smoothing=config.label_smoothing,
-            ),
+            )
+
+        return cls(
+            anomaly_loss=anomaly_loss,
             point_anomaly_loss=point_anomaly_loss,
             reconstruction_loss=MaskedReconstructionLoss(use_mask_only=True),
             anomaly_weight=config.anomaly_loss_weight,
@@ -98,12 +120,7 @@ class TimeRCDMultiTaskLoss(nn.Module):
         )
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
-        """Compute weighted multi-task loss and merged metric dictionary.
-
-        Behavior:
-        - Anomaly term is always computed.
-        - Reconstruction term is computed only when enabled and tensors exist.
-        """
+        """Compute the weighted objective and expose detached diagnostics."""
 
         anomaly_output = self.anomaly_loss(batch, output)
         total_loss = anomaly_output.loss * self.anomaly_weight

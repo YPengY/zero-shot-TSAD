@@ -1,5 +1,14 @@
+"""Epoch-level training loop, progress reporting, and checkpoint orchestration.
+
+The trainer owns the mechanics of optimization and progress emission. It does
+not decide how datasets are built or how models are configured; those assembly
+steps happen in the workflow layer so the trainer can stay focused on runtime
+execution.
+"""
+
 from __future__ import annotations
 
+import logging
 import math
 import time
 from dataclasses import dataclass, field
@@ -13,6 +22,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 
 from ..interfaces import Batch, LossProtocol, ModelProtocol
+from ..utils import get_logger
 from .checkpoint import CheckpointManager
 
 
@@ -47,7 +57,13 @@ class FitResult:
 
 
 class Trainer:
-    """Minimal training loop for TimeRCD-style pretraining."""
+    """Run optimization, validation, progress reporting, and checkpointing.
+
+    The trainer assumes that all structural decisions have already been made:
+    batches are fully collated, loss modules are configured, and model/device
+    placement is resolved. Its responsibility is to execute the loop reliably
+    and emit enough state for monitoring and resuming runs.
+    """
 
     def __init__(
         self,
@@ -63,6 +79,7 @@ class Trainer:
         log_every_n_steps: int = 50,
         mixed_precision: bool = False,
         progress_write_interval_seconds: float = 2.0,
+        logger: logging.Logger | None = None,
     ) -> None:
         """Configure the trainer runtime state.
 
@@ -99,6 +116,7 @@ class Trainer:
         self.mixed_precision = bool(mixed_precision)
         self.progress_write_interval_seconds = float(progress_write_interval_seconds)
         self._last_progress_write_time = 0.0
+        self.logger = logger or get_logger(__name__)
 
         if isinstance(self.model, nn.Module):
             self.model.to(self.device)
@@ -354,9 +372,12 @@ class Trainer:
                     stopped_early=True,
                     force_write=True,
                 )
-                print(
-                    f"Early stopping triggered at epoch {epoch}. "
-                    f"Best epoch={best_epoch}, best_{monitor_metric}={best_metric:.6f}."
+                self.logger.info(
+                    "Early stopping triggered at epoch %d. Best epoch=%s, best_%s=%.6f.",
+                    epoch,
+                    best_epoch,
+                    monitor_metric,
+                    float(best_metric),
                 )
                 break
 
@@ -469,9 +490,12 @@ class Trainer:
                 )
 
             if training and (step % self.log_every_n_steps == 0 or step == num_batches):
-                print(
-                    f"[train] epoch={epoch} step={step}/{num_batches} "
-                    f"loss={float(raw_loss.detach().item()):.6f}"
+                self.logger.info(
+                    "[train] epoch=%d step=%d/%d loss=%.6f",
+                    epoch,
+                    step,
+                    num_batches,
+                    float(raw_loss.detach().item()),
                 )
 
         if sample_count == 0:
@@ -514,7 +538,7 @@ class Trainer:
         if val_metrics is not None:
             val_loss = val_metrics.get("total_loss", float("nan"))
             message += f" val_total_loss={val_loss:.6f}"
-        print(message)
+        self.logger.info(message)
 
     def _current_learning_rate(self) -> float | None:
         if not self.optimizer.param_groups:

@@ -1,3 +1,10 @@
+"""Reconstruction objective used by the masked pretraining path.
+
+The reconstruction head predicts values back in observation space. This module
+decides whether that loss is evaluated only on masked positions or across the
+full valid (non-padding) prefix of each window.
+"""
+
 from __future__ import annotations
 
 import torch
@@ -8,7 +15,7 @@ from ..interfaces import Batch, LossOutput, ModelOutput
 
 
 class MaskedReconstructionLoss(nn.Module):
-    """Mean squared reconstruction loss for masked or full context recovery."""
+    """Mean squared loss for recovering masked or valid context values."""
 
     def __init__(self, *, use_mask_only: bool = True) -> None:
         """Configure reconstruction objective over full or masked positions."""
@@ -35,7 +42,12 @@ class MaskedReconstructionLoss(nn.Module):
         return F.mse_loss(valid_prediction, valid_target)
 
     def forward(self, batch: Batch, output: ModelOutput) -> LossOutput:
-        """Compute reconstruction loss and reconstruction-path diagnostics."""
+        """Compute reconstruction loss on the configured support set.
+
+        When `use_mask_only=True`, only masked positions contribute to the
+        scalar loss. Otherwise the loss is evaluated across the full valid
+        prefix indicated by `batch.point_valid_mask`, excluding right-padding.
+        """
 
         if batch.reconstruction_targets is None:
             raise ValueError("`batch.reconstruction_targets` is required for reconstruction loss.")

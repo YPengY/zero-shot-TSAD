@@ -1,3 +1,5 @@
+"""Causal graph sampling for the synthetic generator."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +11,12 @@ from ..config import GeneratorConfig
 
 @dataclass
 class CausalGraph:
+    """Directed acyclic graph used by the ARX mixing stage.
+
+    `adjacency[parent, child] == 1` means the parent channel can influence the
+    child channel through the sampled ARX response.
+    """
+
     num_nodes: int
     adjacency: np.ndarray  # shape [D, D], adjacency[parent, child] in {0, 1}
     topo_order: list[int]
@@ -16,12 +24,14 @@ class CausalGraph:
 
 
 class CausalGraphSampler:
-    """Stage 2.1: DAG sampling with Erdos-Renyi connectivity."""
+    """Sample sparse DAGs used by the causal mixing stage."""
 
     def __init__(self, config: GeneratorConfig) -> None:
         self.config = config
 
     def sample_graph(self, num_nodes: int, rng: np.random.Generator) -> CausalGraph:
+        """Sample a DAG with a random topological order and Erdos-Renyi edges."""
+
         if num_nodes <= 1:
             adjacency = np.zeros((num_nodes, num_nodes), dtype=np.int8)
             return CausalGraph(

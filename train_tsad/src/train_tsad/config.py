@@ -1,3 +1,10 @@
+"""Typed experiment configuration for training, evaluation, and runtime I/O.
+
+This module defines the stable config surface consumed by the training
+workflows. Each dataclass owns validation for one concern so downstream
+modules can assume already-normalized settings instead of re-validating them.
+"""
+
 from __future__ import annotations
 
 import json
@@ -150,7 +157,11 @@ class LossConfig:
     anomaly_loss_weight: float = 1.0
     point_anomaly_loss_weight: float = 0.0
     reconstruction_loss_weight: float = 0.01
+    anomaly_loss_type: str = "bce"
     anomaly_pos_weight: float | str | None = "auto"
+    anomaly_asl_gamma_neg: float = 2.0
+    anomaly_asl_gamma_pos: float = 0.0
+    anomaly_asl_clip: float = 0.05
     point_anomaly_pos_weight: float | str | None = "auto"
     label_smoothing: float = 0.0
 
@@ -161,11 +172,19 @@ class LossConfig:
             raise ValueError("`loss.point_anomaly_loss_weight` cannot be negative.")
         if self.reconstruction_loss_weight < 0:
             raise ValueError("`loss.reconstruction_loss_weight` cannot be negative.")
+        if self.anomaly_loss_type not in {"bce", "asl"}:
+            raise ValueError("`loss.anomaly_loss_type` must be one of: bce, asl.")
         if isinstance(self.anomaly_pos_weight, str):
             if self.anomaly_pos_weight != "auto":
                 raise ValueError("`loss.anomaly_pos_weight` must be a positive float, null, or `auto`.")
         elif self.anomaly_pos_weight is not None and self.anomaly_pos_weight <= 0:
             raise ValueError("`loss.anomaly_pos_weight` must be positive when provided.")
+        if self.anomaly_asl_gamma_neg < 0:
+            raise ValueError("`loss.anomaly_asl_gamma_neg` cannot be negative.")
+        if self.anomaly_asl_gamma_pos < 0:
+            raise ValueError("`loss.anomaly_asl_gamma_pos` cannot be negative.")
+        if not 0.0 <= self.anomaly_asl_clip < 1.0:
+            raise ValueError("`loss.anomaly_asl_clip` must be in [0, 1).")
         if isinstance(self.point_anomaly_pos_weight, str):
             if self.point_anomaly_pos_weight != "auto":
                 raise ValueError(
@@ -309,6 +328,11 @@ class ExperimentConfig:
         payload["data"]["dataset_root"] = str(self.data.dataset_root)
         payload["train"]["output_dir"] = str(self.train.output_dir)
         return payload
+
+    def clone(self) -> ExperimentConfig:
+        """Return a deep config clone suitable for runtime overrides."""
+
+        return type(self).from_mapping(self.to_dict())
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> ExperimentConfig:
