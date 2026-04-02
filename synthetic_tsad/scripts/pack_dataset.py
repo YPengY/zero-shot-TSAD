@@ -16,7 +16,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Pack per-sample synthetic outputs into shard-based training corpora"
     )
-    parser.add_argument("--input", type=Path, required=True, help="Input sample directory or split root")
+    parser.add_argument(
+        "--input", type=Path, required=True, help="Input sample directory or split root"
+    )
     parser.add_argument("--output", type=Path, required=True, help="Output packed dataset root")
     parser.add_argument(
         "--split",

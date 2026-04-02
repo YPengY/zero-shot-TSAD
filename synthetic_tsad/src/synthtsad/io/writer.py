@@ -123,6 +123,9 @@ class DatasetWriter:
             encoding="utf-8",
         )
 
+    def close(self) -> None:
+        """Provide a no-op shutdown hook shared with streaming writers."""
+
 
 class PackedDatasetWriter:
     """Stream generated samples directly into shard-packed dataset artifacts."""
@@ -242,9 +245,15 @@ class PackedDatasetWriter:
                     "shard_jsonl_path": str(shard_jsonl_path.relative_to(self.output_root)),
                     "length": length,
                     "num_series": num_series,
-                    "is_anomalous_sample": int(payload.get("summary", {}).get("is_anomalous_sample", int(point_mask_any.any()))),
+                    "is_anomalous_sample": int(
+                        payload.get("summary", {}).get(
+                            "is_anomalous_sample", int(point_mask_any.any())
+                        )
+                    ),
                     "num_events": int(len(payload.get("events", []))),
-                    "anomaly_point_ratio": float(point_mask_any.mean()) if point_mask_any.size else 0.0,
+                    "anomaly_point_ratio": float(point_mask_any.mean())
+                    if point_mask_any.size
+                    else 0.0,
                 }
                 self._manifest_handle.write(
                     json.dumps(_to_jsonable(manifest_row), ensure_ascii=False) + "\n"
@@ -253,9 +262,13 @@ class PackedDatasetWriter:
         np.savez_compressed(
             shard_npz_path,
             series_values=np.concatenate(series_values).astype(np.float32, copy=False),
-            normal_series_values=np.concatenate(normal_series_values).astype(np.float32, copy=False),
+            normal_series_values=np.concatenate(normal_series_values).astype(
+                np.float32, copy=False
+            ),
             point_mask_values=np.concatenate(point_mask_values).astype(np.uint8, copy=False),
-            point_mask_any_values=np.concatenate(point_mask_any_values).astype(np.uint8, copy=False),
+            point_mask_any_values=np.concatenate(point_mask_any_values).astype(
+                np.uint8, copy=False
+            ),
             lengths=np.asarray(lengths, dtype=np.int32),
             num_series=np.asarray(num_series_list, dtype=np.int32),
             series_offsets=np.asarray(series_offsets, dtype=np.int64),
@@ -360,9 +373,7 @@ class PackedWindowDatasetWriter:
         sample_series = np.asarray(observed_series, dtype=np.float32)
         sample_point_mask = np.asarray(labels["point_mask"], dtype=np.uint8)
         if sample_series.ndim != 2:
-            raise ValueError(
-                f"`observed_series` must be [T, D], got shape {sample_series.shape}."
-            )
+            raise ValueError(f"`observed_series` must be [T, D], got shape {sample_series.shape}.")
         if normal_series_arr.shape != sample_series.shape:
             raise ValueError(
                 "`normal_series` shape mismatch: "
@@ -522,9 +533,13 @@ class PackedWindowDatasetWriter:
             if self._debug_handle is not None and debug_row is not None:
                 manifest_row["debug_jsonl_path"] = debug_sidecar_rel
                 manifest_row["debug_row_index"] = int(self._next_debug_row_index)
-                self._debug_handle.write(json.dumps(_to_jsonable(debug_row), ensure_ascii=False) + "\n")
+                self._debug_handle.write(
+                    json.dumps(_to_jsonable(debug_row), ensure_ascii=False) + "\n"
+                )
                 self._next_debug_row_index += 1
-            self._manifest_handle.write(json.dumps(_to_jsonable(manifest_row), ensure_ascii=False) + "\n")
+            self._manifest_handle.write(
+                json.dumps(_to_jsonable(manifest_row), ensure_ascii=False) + "\n"
+            )
 
         self._series_windows_buffer.clear()
         self._point_mask_windows_buffer.clear()

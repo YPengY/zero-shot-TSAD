@@ -69,9 +69,7 @@ class AnomalyPlacementConfig:
     def resolve_max_events_per_node(self, sequence_length: int) -> int:
         if sequence_length <= 0:
             return 0
-        scaled = (
-            float(self.max_events_per_1000_steps_per_node) * float(sequence_length) / 1000.0
-        )
+        scaled = float(self.max_events_per_1000_steps_per_node) * float(sequence_length) / 1000.0
         return max(0, int(scaled + 0.5))
 
 
@@ -857,8 +855,7 @@ def _normalize_sequence_length(raw: Any) -> SequenceLengthConfig:
         decay_scale = float(decay_scale_raw)
         if decay_scale <= 0.0:
             raise ValueError(
-                "`sequence_length.decay_scale` must be positive when provided, "
-                f"got {decay_scale}."
+                f"`sequence_length.decay_scale` must be positive when provided, got {decay_scale}."
             )
     if distribution == "truncated_exponential" and decay_scale is None:
         support = max(1, bounds.max - bounds.min + 1)

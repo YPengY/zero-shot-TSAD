@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 
-
 SplitName = str
 
 
@@ -43,7 +42,9 @@ class PackReport:
     splits: dict[SplitName, SplitPackStats]
 
 
-def discover_input_splits(input_root: Path, split: SplitName | None = None) -> dict[SplitName, Path]:
+def discover_input_splits(
+    input_root: Path, split: SplitName | None = None
+) -> dict[SplitName, Path]:
     if split is not None:
         return {split: input_root.resolve()}
 
@@ -138,9 +139,7 @@ def write_dataset_meta_for_existing_packed_corpus(
         )
 
     if not split_reports:
-        raise FileNotFoundError(
-            f"No manifest files were found under packed root: {output_root}"
-        )
+        raise FileNotFoundError(f"No manifest files were found under packed root: {output_root}")
 
     resolved_samples_per_shard = (
         int(samples_per_shard)
@@ -149,8 +148,7 @@ def write_dataset_meta_for_existing_packed_corpus(
     )
     if resolved_samples_per_shard <= 0:
         raise ValueError(
-            "`samples_per_shard` must be positive when provided, "
-            f"got {resolved_samples_per_shard}."
+            f"`samples_per_shard` must be positive when provided, got {resolved_samples_per_shard}."
         )
 
     resolved_dataset_name = dataset_name or output_root.parent.name or "synthetic_rcd"
@@ -238,9 +236,7 @@ def _slice_or_pad_2d(
     if window.ndim != 2:
         raise ValueError(f"Expected 2D array slice, got shape {window.shape}.")
     if window.shape[0] > target_length:
-        raise ValueError(
-            f"Window length {window.shape[0]} exceeds target_length {target_length}."
-        )
+        raise ValueError(f"Window length {window.shape[0]} exceeds target_length {target_length}.")
     if window.shape[0] == target_length:
         return np.ascontiguousarray(window)
     padded = np.full((target_length, window.shape[1]), pad_value, dtype=dtype)
@@ -250,9 +246,7 @@ def _slice_or_pad_2d(
 
 def _build_patch_labels(point_mask_window: np.ndarray, patch_size: int) -> np.ndarray:
     if point_mask_window.ndim != 2:
-        raise ValueError(
-            f"`point_mask_window` must be [W, D], got {point_mask_window.shape}."
-        )
+        raise ValueError(f"`point_mask_window` must be [W, D], got {point_mask_window.shape}.")
     if point_mask_window.shape[0] % patch_size != 0:
         raise ValueError(
             f"Window length {point_mask_window.shape[0]} must be divisible by patch_size={patch_size}."
@@ -309,13 +303,11 @@ def pack_windows_from_packed_corpus(
         raise ValueError(f"windows_per_shard must be positive, got {windows_per_shard}")
     if min_patch_positive_ratio is not None and float(min_patch_positive_ratio) < 0.0:
         raise ValueError(
-            "`min_patch_positive_ratio` must be >= 0 when provided, "
-            f"got {min_patch_positive_ratio}"
+            f"`min_patch_positive_ratio` must be >= 0 when provided, got {min_patch_positive_ratio}"
         )
     if min_anomaly_point_ratio is not None and float(min_anomaly_point_ratio) < 0.0:
         raise ValueError(
-            "`min_anomaly_point_ratio` must be >= 0 when provided, "
-            f"got {min_anomaly_point_ratio}"
+            f"`min_anomaly_point_ratio` must be >= 0 when provided, got {min_anomaly_point_ratio}"
         )
 
     input_root = input_root.resolve()
@@ -483,8 +475,12 @@ def _pack_window_split(
         np.savez_compressed(
             shard_npz_path,
             series_windows=np.stack(series_windows_buffer, axis=0).astype(np.float32, copy=False),
-            point_mask_windows=np.stack(point_mask_windows_buffer, axis=0).astype(np.uint8, copy=False),
-            patch_labels_windows=np.stack(patch_labels_windows_buffer, axis=0).astype(np.uint8, copy=False),
+            point_mask_windows=np.stack(point_mask_windows_buffer, axis=0).astype(
+                np.uint8, copy=False
+            ),
+            patch_labels_windows=np.stack(patch_labels_windows_buffer, axis=0).astype(
+                np.uint8, copy=False
+            ),
             valid_lengths=np.asarray(valid_lengths_buffer, dtype=np.int32),
             context_start=np.asarray(context_start_buffer, dtype=np.int32),
             context_end=np.asarray(context_end_buffer, dtype=np.int32),
@@ -565,12 +561,12 @@ def _pack_window_split(
                 if flat_end - flat_start != expected_flat:
                     raise ValueError(
                         f"Corrupt source offsets in {shard_npz_path}: "
-                        f"sample_index={sample_index}, expected={expected_flat}, actual={flat_end-flat_start}"
+                        f"sample_index={sample_index}, expected={expected_flat}, actual={flat_end - flat_start}"
                     )
                 if time_end - time_start != sample_length:
                     raise ValueError(
                         f"Corrupt source time offsets in {shard_npz_path}: "
-                        f"sample_index={sample_index}, expected={sample_length}, actual={time_end-time_start}"
+                        f"sample_index={sample_index}, expected={sample_length}, actual={time_end - time_start}"
                     )
 
                 sample_series = shard_arrays["series_values"][flat_start:flat_end].reshape(
@@ -587,7 +583,9 @@ def _pack_window_split(
                 if write_debug_sidecar:
                     shard_jsonl_path_raw = source_row.get("shard_jsonl_path")
                     if shard_jsonl_path_raw is not None:
-                        shard_jsonl_path = (manifest_path.parent / str(shard_jsonl_path_raw)).resolve()
+                        shard_jsonl_path = (
+                            manifest_path.parent / str(shard_jsonl_path_raw)
+                        ).resolve()
                         if shard_jsonl_path.exists():
                             metadata_rows = load_source_metadata_rows(shard_jsonl_path)
                             if 0 <= sample_index < len(metadata_rows):
@@ -678,11 +676,15 @@ def _pack_window_split(
                     num_series_values.append(int(num_series))
 
                     if len(series_windows_buffer) >= windows_per_shard:
-                        flush_window_shard(shard_count, manifest_handle=manifest_handle, debug_handle=debug_handle)
+                        flush_window_shard(
+                            shard_count, manifest_handle=manifest_handle, debug_handle=debug_handle
+                        )
                         shard_count += 1
 
             if series_windows_buffer:
-                flush_window_shard(shard_count, manifest_handle=manifest_handle, debug_handle=debug_handle)
+                flush_window_shard(
+                    shard_count, manifest_handle=manifest_handle, debug_handle=debug_handle
+                )
                 shard_count += 1
         finally:
             if debug_handle is not None:
@@ -860,7 +862,9 @@ def _write_shard(
                     "shard_id": shard_index,
                     "sample_index": sample_index,
                     "shard_npz_path": str(shard_npz_path.relative_to(shard_npz_path.parents[1])),
-                    "shard_jsonl_path": str(shard_jsonl_path.relative_to(shard_jsonl_path.parents[1])),
+                    "shard_jsonl_path": str(
+                        shard_jsonl_path.relative_to(shard_jsonl_path.parents[1])
+                    ),
                     "length": length,
                     "num_series": num_series,
                     "is_anomalous_sample": is_anomalous_sample,
@@ -908,9 +912,7 @@ def _validate_sample_shapes(
             f"{sample_id}: point_mask shape mismatch, expected {series.shape}, got {point_mask.shape}"
         )
     if point_mask_any.ndim != 1 or point_mask_any.shape[0] != series.shape[0]:
-        raise ValueError(
-            f"{sample_id}: point_mask_any must be [T], got {point_mask_any.shape}"
-        )
+        raise ValueError(f"{sample_id}: point_mask_any must be [T], got {point_mask_any.shape}")
 
 
 def _summarize_manifest_split(
@@ -932,13 +934,9 @@ def _summarize_manifest_split(
             try:
                 row = json.loads(row_text)
             except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"Invalid JSON in {manifest_path}:{line_number}"
-                ) from exc
+                raise ValueError(f"Invalid JSON in {manifest_path}:{line_number}") from exc
             if not isinstance(row, dict):
-                raise ValueError(
-                    f"Manifest row must be an object in {manifest_path}:{line_number}"
-                )
+                raise ValueError(f"Manifest row must be an object in {manifest_path}:{line_number}")
 
             try:
                 length = int(row["length"])
@@ -946,14 +944,12 @@ def _summarize_manifest_split(
                 shard_id = int(row["shard_id"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError(
-                    f"Manifest row missing required numeric fields in "
-                    f"{manifest_path}:{line_number}"
+                    f"Manifest row missing required numeric fields in {manifest_path}:{line_number}"
                 ) from exc
 
             if length <= 0 or num_series <= 0:
                 raise ValueError(
-                    f"Manifest row has non-positive dimensions in "
-                    f"{manifest_path}:{line_number}"
+                    f"Manifest row has non-positive dimensions in {manifest_path}:{line_number}"
                 )
 
             lengths.append(length)

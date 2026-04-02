@@ -349,5 +349,4 @@ class SyntheticGeneratorPipeline:
                     metadata=metadata,
                 )
         finally:
-            if hasattr(writer, "close"):
-                writer.close()
+            writer.close()
