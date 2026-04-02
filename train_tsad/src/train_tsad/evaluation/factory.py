@@ -3,7 +3,6 @@ from __future__ import annotations
 from ..config import DataConfig, EvalConfig
 from .evaluator import PatchFeatureEvaluator, TimeRCDEvaluator
 
-
 Evaluator = PatchFeatureEvaluator | TimeRCDEvaluator
 
 
@@ -24,14 +23,10 @@ def build_evaluator(
             threshold_search=eval_config.threshold_search,
             threshold_search_metric=eval_config.threshold_search_metric,
             report_per_feature=(
-                eval_config.report_per_feature
-                if report_per_feature is None
-                else report_per_feature
+                eval_config.report_per_feature if report_per_feature is None else report_per_feature
             ),
             report_per_sample=(
-                eval_config.report_per_sample
-                if report_per_sample is None
-                else report_per_sample
+                eval_config.report_per_sample if report_per_sample is None else report_per_sample
             ),
         )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..interfaces import ContextWindowSample, ContextWindowizerProtocol, DatasetProtocol
+from ..interfaces import ContextWindowizerProtocol, ContextWindowSample, DatasetProtocol
 from .records import _WindowRecord
 
 

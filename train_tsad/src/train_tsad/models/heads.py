@@ -42,7 +42,9 @@ class AnomalyHead(nn.Module):
     def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
         """Map encoded tokens to patch-level logits `[B, N_patches, D]`."""
 
-        token_grid = _reshape_token_grid(self.norm(tokens), num_patches=num_patches, num_features=num_features)
+        token_grid = _reshape_token_grid(
+            self.norm(tokens), num_patches=num_patches, num_features=num_features
+        )
         return self.projection(token_grid).squeeze(-1)
 
 
@@ -68,7 +70,9 @@ class ReconstructionHead(nn.Module):
     def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
         """Decode token grid back to point sequence `[B, W, D]`."""
 
-        token_grid = _reshape_token_grid(self.norm(tokens), num_patches=num_patches, num_features=num_features)
+        token_grid = _reshape_token_grid(
+            self.norm(tokens), num_patches=num_patches, num_features=num_features
+        )
         patch_values = self.projection(token_grid)
         sequence = patch_values.permute(0, 2, 1, 3).reshape(
             tokens.shape[0],
@@ -169,7 +173,9 @@ class ObservationSpaceAnomalyHead(nn.Module):
     def forward(self, tokens: Tensor, *, num_patches: int, num_features: int) -> Tensor:
         """Decode token grid to point-level anomaly logits `[B, W, D]`."""
 
-        token_grid = _reshape_token_grid(self.norm(tokens), num_patches=num_patches, num_features=num_features)
+        token_grid = _reshape_token_grid(
+            self.norm(tokens), num_patches=num_patches, num_features=num_features
+        )
         patch_logits = self.projection(token_grid)
         sequence = patch_logits.permute(0, 2, 1, 3).reshape(
             tokens.shape[0],

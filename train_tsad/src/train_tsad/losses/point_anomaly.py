@@ -76,7 +76,9 @@ class PointAnomalyLoss(nn.Module):
                 )
             valid_mask = valid_mask.to(device=logits.device, dtype=torch.bool)
             if not torch.any(valid_mask):
-                raise ValueError("`batch.point_valid_mask` does not contain any valid point-feature units.")
+                raise ValueError(
+                    "`batch.point_valid_mask` does not contain any valid point-feature units."
+                )
             logits = logits[valid_mask]
             targets = targets[valid_mask]
 

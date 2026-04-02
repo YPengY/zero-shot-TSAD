@@ -12,44 +12,57 @@ from .processes import run_parallel_split_generation, run_subprocess
 from .runtime import (
     build_run_info,
     build_workbench_train_config,
-    count_manifest_rows,
     default_runs_root,
     ensure_train_config_for_run,
-    find_training_config_path,
     generate_default_run_name,
     infer_run_root_from_config_path,
     is_training_config_payload,
     load_json_mapping,
-    resolve_packed_root,
     resolve_path_like,
     resolve_python_executable,
     resolve_run_root,
     validate_generation_target_space,
 )
-from .studio_bridge import pack_windows_from_packed_corpus, write_dataset_meta_for_existing_packed_corpus
+from .studio_bridge import (
+    pack_windows_from_packed_corpus,
+    write_dataset_meta_for_existing_packed_corpus,
+)
 
 
-def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: JobStore) -> dict[str, Any]:
+def run_generation_job(
+    payload: dict[str, Any], job: JobState, *, job_store: JobStore
+) -> dict[str, Any]:
     """Run the asynchronous dataset generation workflow."""
 
     python_exe = resolve_python_executable()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = str(payload.get("run_name", generate_default_run_name())).strip() or f"workbench_run_{timestamp}"
+    run_name = (
+        str(payload.get("run_name", generate_default_run_name())).strip()
+        or f"workbench_run_{timestamp}"
+    )
     run_root_input = str(payload.get("run_root", "")).strip()
-    run_root = resolve_path_like(run_root_input) if run_root_input else (default_runs_root() / run_name).resolve()
+    run_root = (
+        resolve_path_like(run_root_input)
+        if run_root_input
+        else (default_runs_root() / run_name).resolve()
+    )
 
     overwrite = bool(payload.get("overwrite_run", False))
     confirm_overwrite = bool(payload.get("confirm_overwrite", False))
     if run_root.exists() and overwrite:
         if not confirm_overwrite:
-            raise FileExistsError(f"Run root already exists and overwrite was not confirmed: {run_root}")
+            raise FileExistsError(
+                f"Run root already exists and overwrite was not confirmed: {run_root}"
+            )
         shutil.rmtree(run_root)
     elif run_root.exists() and not overwrite:
         raise FileExistsError(f"Run root already exists: {run_root}")
 
     direct_pack = bool(payload.get("direct_pack", True))
     window_pack = bool(payload.get("window_pack", False))
-    direct_window_pack = bool(payload.get("direct_window_pack", True)) and direct_pack and window_pack
+    direct_window_pack = (
+        bool(payload.get("direct_window_pack", True)) and direct_pack and window_pack
+    )
     raw_root = run_root / "data_raw"
     packed_root = run_root / "data_packed"
     window_packed_root = run_root / "data_packed_windows"
@@ -91,18 +104,30 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
     if not isinstance(synthetic_config, dict):
         raise ValueError("Generation requires the full edited synthetic config.")
 
-    train_template_name = str(payload.get("train_template", "timercd_small.json")).strip() or "timercd_small.json"
+    train_template_name = (
+        str(payload.get("train_template", "timercd_small.json")).strip() or "timercd_small.json"
+    )
     generation_metadata = {
         "train_template": train_template_name,
         "train_device": str(payload["train_device"]) if payload.get("train_device") else None,
-        "train_max_epochs": int(payload["train_max_epochs"]) if payload.get("train_max_epochs") is not None else None,
-        "train_batch_size": int(payload["train_batch_size"]) if payload.get("train_batch_size") is not None else None,
-        "eval_batch_size": int(payload["eval_batch_size"]) if payload.get("eval_batch_size") is not None else None,
+        "train_max_epochs": int(payload["train_max_epochs"])
+        if payload.get("train_max_epochs") is not None
+        else None,
+        "train_batch_size": int(payload["train_batch_size"])
+        if payload.get("train_batch_size") is not None
+        else None,
+        "eval_batch_size": int(payload["eval_batch_size"])
+        if payload.get("eval_batch_size") is not None
+        else None,
     }
     synthetic_config_path = config_root / "synthetic_runtime_config.json"
-    synthetic_config_path.write_text(json.dumps(synthetic_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    synthetic_config_path.write_text(
+        json.dumps(synthetic_config, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     generation_metadata_path = config_root / "workbench_generation_metadata.json"
-    generation_metadata_path.write_text(json.dumps(generation_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    generation_metadata_path.write_text(
+        json.dumps(generation_metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     split_counts = {
         "train": int(payload.get("train_samples", 10000)),
@@ -123,7 +148,11 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
 
     split_commands: list[tuple[str, list[str]]] = []
     for split_index, split in enumerate(("train", "val", "test"), start=1):
-        output_path = window_packed_root if direct_window_pack else (packed_root if direct_pack else (raw_root / split))
+        output_path = (
+            window_packed_root
+            if direct_window_pack
+            else (packed_root if direct_pack else (raw_root / split))
+        )
         cmd = [
             str(python_exe),
             "-B",
@@ -138,8 +167,12 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
             str(seed_base + split_index),
         ]
         if direct_window_pack:
-            split_min_patch_positive_ratio = window_train_min_patch_positive_ratio if split == "train" else None
-            split_min_anomaly_point_ratio = window_train_min_anomaly_point_ratio if split == "train" else None
+            split_min_patch_positive_ratio = (
+                window_train_min_patch_positive_ratio if split == "train" else None
+            )
+            split_min_anomaly_point_ratio = (
+                window_train_min_anomaly_point_ratio if split == "train" else None
+            )
             cmd.extend(
                 [
                     "--direct-window-pack",
@@ -154,7 +187,9 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
                 ]
             )
             if split_min_patch_positive_ratio is not None:
-                cmd.extend(["--window-min-patch-positive-ratio", str(split_min_patch_positive_ratio)])
+                cmd.extend(
+                    ["--window-min-patch-positive-ratio", str(split_min_patch_positive_ratio)]
+                )
             if split_min_anomaly_point_ratio is not None:
                 cmd.extend(["--window-min-anomaly-point-ratio", str(split_min_anomaly_point_ratio)])
             if window_stride is not None:
@@ -166,13 +201,19 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
             if not window_debug_sidecar:
                 cmd.append("--window-no-debug-sidecar")
         elif direct_pack:
-            cmd.extend(["--direct-pack", "--split", split, "--samples-per-shard", str(samples_per_shard)])
+            cmd.extend(
+                ["--direct-pack", "--split", split, "--samples-per-shard", str(samples_per_shard)]
+            )
         split_commands.append((split, cmd))
 
     run_parallel_split_generation(split_commands, cwd=PROJECT_ROOT, job=job, job_store=job_store)
     if direct_window_pack:
-        job_store.append_log(job, "All split generation processes finished in direct-window-pack mode.")
-        resolved_window_stride = window_context_size if window_stride is None else int(window_stride)
+        job_store.append_log(
+            job, "All split generation processes finished in direct-window-pack mode."
+        )
+        resolved_window_stride = (
+            window_context_size if window_stride is None else int(window_stride)
+        )
         meta_report = write_dataset_meta_for_existing_packed_corpus(
             window_packed_root,
             dataset_name=dataset_name,
@@ -187,10 +228,18 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
                 "pad_short_sequences": bool(window_pad_short_sequences),
                 "windows_per_shard": int(window_windows_per_shard),
                 "debug_sidecar": bool(window_debug_sidecar),
-                "required_fields": ["series_windows", "point_mask_windows", "patch_labels_windows", "valid_lengths"],
+                "required_fields": [
+                    "series_windows",
+                    "point_mask_windows",
+                    "patch_labels_windows",
+                    "valid_lengths",
+                ],
             },
         )
-        job_store.append_log(job, f"Wrote dataset_meta.json for window-packed manifests (splits={list(meta_report.splits.keys())}).")
+        job_store.append_log(
+            job,
+            f"Wrote dataset_meta.json for window-packed manifests (splits={list(meta_report.splits.keys())}).",
+        )
         training_dataset_root = window_packed_root
     elif direct_pack:
         job_store.append_log(job, "All split generation processes finished in direct-pack mode.")
@@ -200,10 +249,15 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
             dataset_version=dataset_version,
             samples_per_shard=samples_per_shard,
         )
-        job_store.append_log(job, f"Wrote dataset_meta.json from packed manifests (splits={list(meta_report.splits.keys())}).")
+        job_store.append_log(
+            job,
+            f"Wrote dataset_meta.json from packed manifests (splits={list(meta_report.splits.keys())}).",
+        )
         training_dataset_root = packed_root
     else:
-        job_store.append_log(job, "All split generation processes finished. Starting shard packing.")
+        job_store.append_log(
+            job, "All split generation processes finished. Starting shard packing."
+        )
         pack_cmd = [
             str(python_exe),
             "-B",
@@ -242,7 +296,10 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
             min_anomaly_point_ratio=window_train_min_anomaly_point_ratio,
         )
         total_windows = sum(report.num_samples for report in window_report.splits.values())
-        job_store.append_log(job, f"Window-level packing finished: splits={list(window_report.splits.keys())}, total_windows={total_windows}.")
+        job_store.append_log(
+            job,
+            f"Window-level packing finished: splits={list(window_report.splits.keys())}, total_windows={total_windows}.",
+        )
         training_dataset_root = window_packed_root
 
     train_config = build_workbench_train_config(
@@ -252,13 +309,23 @@ def run_generation_job(payload: dict[str, Any], job: JobState, *, job_store: Job
         allow_template_fallback=False,
     )
     train_config_path = config_root / "train_generated.json"
-    train_config_path.write_text(json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    train_config_path.write_text(
+        json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     result = build_run_info(str(run_root))
     generation_mode = (
         "direct_window_pack"
         if direct_window_pack
-        else ("direct_pack+window_pack" if direct_pack and window_pack else ("direct_pack" if direct_pack else ("raw_then_pack+window_pack" if window_pack else "raw_then_pack")))
+        else (
+            "direct_pack+window_pack"
+            if direct_pack and window_pack
+            else (
+                "direct_pack"
+                if direct_pack
+                else ("raw_then_pack+window_pack" if window_pack else "raw_then_pack")
+            )
+        )
     )
     result.update(
         {
@@ -297,13 +364,20 @@ def run_train_job(payload: dict[str, Any], job: JobState, *, job_store: JobStore
                 raise ValueError(
                     "Provided config_path is not a valid training config. Expected a JSON file with `data` and `train` sections."
                 )
-            resolved_config_path, resolved_config_payload, repaired = ensure_train_config_for_run(inferred_run_root)
+            resolved_config_path, resolved_config_payload, repaired = ensure_train_config_for_run(
+                inferred_run_root
+            )
             if repaired or resolved_config_path != config_path:
-                job_store.append_log(job, f"Resolved training config automatically: {config_path} -> {resolved_config_path}")
+                job_store.append_log(
+                    job,
+                    f"Resolved training config automatically: {config_path} -> {resolved_config_path}",
+                )
             config_path = resolved_config_path
             config_payload = resolved_config_payload
     elif run_root_raw:
-        config_path, config_payload, repaired = ensure_train_config_for_run(resolve_run_root(run_root_raw))
+        config_path, config_payload, repaired = ensure_train_config_for_run(
+            resolve_run_root(run_root_raw)
+        )
         if repaired:
             job_store.append_log(job, f"Rebuilt missing training config at {config_path}.")
     else:
@@ -327,7 +401,13 @@ def run_train_job(payload: dict[str, Any], job: JobState, *, job_store: JobStore
             },
         )
 
-    cmd = [str(python_exe), "-B", str(TRAIN_TSAD_ROOT / "scripts" / "train.py"), "--config", str(config_path)]
+    cmd = [
+        str(python_exe),
+        "-B",
+        str(TRAIN_TSAD_ROOT / "scripts" / "train.py"),
+        "--config",
+        str(config_path),
+    ]
     if payload.get("device"):
         cmd.extend(["--device", str(payload["device"])])
     if payload.get("max_epochs") is not None:
@@ -343,7 +423,9 @@ def run_train_job(payload: dict[str, Any], job: JobState, *, job_store: JobStore
     return {
         "config_path": str(config_path),
         "output_dir": output_dir_str,
-        "data_quality_report": str(Path(output_dir_str) / "data_quality_report.json") if output_dir_str else None,
+        "data_quality_report": str(Path(output_dir_str) / "data_quality_report.json")
+        if output_dir_str
+        else None,
         "history_path": str(Path(output_dir_str) / "history.json") if output_dir_str else None,
         "summary_path": str(Path(output_dir_str) / "summary.json") if output_dir_str else None,
         "progress_path": str(Path(output_dir_str) / "progress.json") if output_dir_str else None,

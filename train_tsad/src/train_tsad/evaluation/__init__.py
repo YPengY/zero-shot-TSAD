@@ -7,7 +7,12 @@ those pieces together for a given model/output style.
 
 from .evaluator import PatchFeatureEvaluator, TimeRCDEvaluator
 from .factory import Evaluator, build_evaluator
-from .metrics import average_precision, compute_detection_metrics, find_best_threshold, precision_recall_f1
+from .metrics import (
+    average_precision,
+    compute_detection_metrics,
+    find_best_threshold,
+    precision_recall_f1,
+)
 from .postprocess import (
     PatchFeatureAccumulator,
     PatchFeatureRecord,

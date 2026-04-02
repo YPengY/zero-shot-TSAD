@@ -21,7 +21,6 @@ from ..data.quality import DatasetQualityReport
 from ..data.windowizer import SlidingContextWindowizer
 from ..utils import resolve_path, write_json_file
 
-
 LabelSpace = Literal["patch_feature", "point_feature"]
 
 
@@ -61,7 +60,9 @@ class LabelBalanceStatistics:
             "num_positive_units": float(self.num_positive_units),
             "num_negative_units": float(self.num_negative_units),
             "positive_rate": float(self.positive_rate),
-            "auto_pos_weight": float(self.auto_pos_weight) if self.num_positive_units > 0 else float("nan"),
+            "auto_pos_weight": float(self.auto_pos_weight)
+            if self.num_positive_units > 0
+            else float("nan"),
         }
 
 
@@ -110,8 +111,7 @@ def _iter_windows(raw_dataset: RawDataset, *, data_config: DataConfig):
 
     windowizer = _build_windowizer(data_config)
     for sample_index in range(len(raw_dataset)):
-        for window in windowizer.transform(raw_dataset[sample_index]):
-            yield window
+        yield from windowizer.transform(raw_dataset[sample_index])
 
 
 def _compute_label_balance(
@@ -200,9 +200,7 @@ def resolve_loss_weights(
 
     if loss_config.anomaly_loss_type == "asl":
         anomaly_pos_weight = None
-        logger.info(
-            "Patch anomaly loss uses ASL; `anomaly_pos_weight` is intentionally ignored."
-        )
+        logger.info("Patch anomaly loss uses ASL; `anomaly_pos_weight` is intentionally ignored.")
     else:
         configured_patch_weight = loss_config.anomaly_pos_weight
         if configured_patch_weight is None:

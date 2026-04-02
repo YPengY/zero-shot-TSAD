@@ -7,7 +7,6 @@ from pathlib import Path
 from ..utils import configure_logging, get_logger
 from ..workflows import EvaluationOverrides, run_evaluation
 
-
 TRAIN_TSAD_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_ROOT = TRAIN_TSAD_ROOT.parent
 

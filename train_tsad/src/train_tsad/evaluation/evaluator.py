@@ -20,8 +20,8 @@ from .postprocess import (
     PatchFeatureAccumulator,
     PointScoreAccumulator,
     patch_scores_to_point_scores,
-    reduce_point_feature_scores,
     reduce_patch_scores,
+    reduce_point_feature_scores,
 )
 
 
@@ -192,7 +192,9 @@ class TimeRCDEvaluator:
 
         if batch.point_mask_any is None:
             if batch.point_masks is None:
-                raise ValueError("Evaluator requires `batch.point_mask_any` or `batch.point_masks`.")
+                raise ValueError(
+                    "Evaluator requires `batch.point_mask_any` or `batch.point_masks`."
+                )
             point_targets = batch.point_masks.any(dim=-1)
         else:
             point_targets = batch.point_mask_any
@@ -222,7 +224,9 @@ class TimeRCDEvaluator:
                     patch_probabilities[index],
                     reduction=self.score_reduction,
                 )
-                point_scores = patch_scores_to_point_scores(patch_scores, patch_size=self.patch_size)
+                point_scores = patch_scores_to_point_scores(
+                    patch_scores, patch_size=self.patch_size
+                )
 
             state = self.sample_states.setdefault(
                 sample_id,
@@ -265,5 +269,6 @@ class TimeRCDEvaluator:
         """Clear all accumulated state so evaluator can be reused."""
 
         self.sample_states.clear()
+
 
 __all__ = ["PatchFeatureEvaluator", "TimeRCDEvaluator"]

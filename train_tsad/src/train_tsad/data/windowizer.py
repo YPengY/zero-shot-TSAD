@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..interfaces import ContextWindowSample, ContextWindowizerProtocol, RawSample, SplitName
+from ..interfaces import ContextWindowizerProtocol, ContextWindowSample, RawSample, SplitName
 
 
 def _as_float32_2d(array: np.ndarray, *, name: str) -> np.ndarray:

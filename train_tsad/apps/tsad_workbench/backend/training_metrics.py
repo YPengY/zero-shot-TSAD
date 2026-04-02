@@ -84,7 +84,11 @@ def build_metric_series(history: list[dict[str, Any]]) -> dict[str, Any]:
             series[name].append(float(value) if isinstance(value, (int, float)) else None)
 
     preferred_loss = next(
-        (name for name in metric_names if name.endswith("total_loss") and name.startswith("train.")),
+        (
+            name
+            for name in metric_names
+            if name.endswith("total_loss") and name.startswith("train.")
+        ),
         None,
     )
     preferred_val = next((name for name in metric_names if name.startswith("val.")), None)
@@ -96,7 +100,9 @@ def build_metric_series(history: list[dict[str, Any]]) -> dict[str, Any]:
         "preferred_loss": preferred_loss,
         "preferred_quality": preferred_val,
         "chart_groups": group_metric_names(metric_names),
-        "latest_epoch": int(latest_entry.get("epoch", 0)) if isinstance(latest_entry, dict) and latest_entry else None,
+        "latest_epoch": int(latest_entry.get("epoch", 0))
+        if isinstance(latest_entry, dict) and latest_entry
+        else None,
         "latest_train": latest_entry.get("train") if isinstance(latest_entry, dict) else None,
         "latest_val": latest_entry.get("val") if isinstance(latest_entry, dict) else None,
     }
@@ -114,7 +120,9 @@ def build_training_kpis(
     latest_val = latest_entry.get("val") if isinstance(latest_entry, dict) else None
     progress_train = progress.get("latest_train_metrics") if isinstance(progress, dict) else None
     progress_val = progress.get("latest_val_metrics") if isinstance(progress, dict) else None
-    latest_train = progress_train if isinstance(progress_train, dict) and progress_train else latest_train
+    latest_train = (
+        progress_train if isinstance(progress_train, dict) and progress_train else latest_train
+    )
     latest_val = progress_val if isinstance(progress_val, dict) and progress_val else latest_val
 
     monitor_metric = progress.get("monitor_metric") if isinstance(progress, dict) else None
@@ -141,7 +149,9 @@ def build_training_kpis(
         "epoch_total": progress.get("epoch_total") if isinstance(progress, dict) else None,
         "status": progress.get("status") if isinstance(progress, dict) else None,
         "stage": progress.get("stage") if isinstance(progress, dict) else None,
-        "overall_progress_ratio": progress.get("overall_progress_ratio") if isinstance(progress, dict) else None,
+        "overall_progress_ratio": progress.get("overall_progress_ratio")
+        if isinstance(progress, dict)
+        else None,
         "learning_rate": progress.get("learning_rate") if isinstance(progress, dict) else None,
         "elapsed_seconds": progress.get("elapsed_seconds") if isinstance(progress, dict) else None,
         "eta_seconds": progress.get("eta_seconds") if isinstance(progress, dict) else None,
@@ -155,7 +165,9 @@ def build_training_kpis(
     }
 
 
-def build_train_metrics_payload(*, output_dir_raw: str | None, run_root_raw: str | None) -> dict[str, Any]:
+def build_train_metrics_payload(
+    *, output_dir_raw: str | None, run_root_raw: str | None
+) -> dict[str, Any]:
     """Build the payload returned by `/api/train-metrics`."""
 
     output_dir = resolve_train_output_dir(output_dir_raw, run_root_raw)
@@ -170,8 +182,12 @@ def build_train_metrics_payload(*, output_dir_raw: str | None, run_root_raw: str
         if isinstance(payload, list):
             history = payload
 
-    summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
-    quality = json.loads(quality_path.read_text(encoding="utf-8")) if quality_path.exists() else None
+    summary = (
+        json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
+    )
+    quality = (
+        json.loads(quality_path.read_text(encoding="utf-8")) if quality_path.exists() else None
+    )
     progress = read_json_artifact(progress_path)
     return {
         "output_dir": str(output_dir),

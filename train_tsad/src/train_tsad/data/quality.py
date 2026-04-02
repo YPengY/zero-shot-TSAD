@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 import numpy as np
 
@@ -106,7 +106,9 @@ class DataQualityInspector:
     def _compute_overall_score(split_reports: Mapping[str, SplitQualityReport]) -> float:
         if not split_reports:
             return 0.0
-        return float(np.mean([report.quality_score for report in split_reports.values()], dtype=np.float64))
+        return float(
+            np.mean([report.quality_score for report in split_reports.values()], dtype=np.float64)
+        )
 
     @staticmethod
     def _recommend_training(

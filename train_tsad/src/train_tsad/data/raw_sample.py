@@ -22,7 +22,9 @@ def _ensure_1d_array(name: str, value: np.ndarray, expected_length: int) -> np.n
     if value.ndim != 1:
         raise ValueError(f"{name} must be 1D [T], got shape {value.shape}")
     if value.shape[0] != expected_length:
-        raise ValueError(f"{name} length mismatch: expected {expected_length}, got {value.shape[0]}")
+        raise ValueError(
+            f"{name} length mismatch: expected {expected_length}, got {value.shape[0]}"
+        )
     return value
 
 
@@ -60,7 +62,9 @@ def load_raw_sample(
 
         point_mask = None
         if "point_mask" in npz.files:
-            point_mask = _ensure_2d_array("point_mask", np.asarray(npz["point_mask"], dtype=np.uint8))
+            point_mask = _ensure_2d_array(
+                "point_mask", np.asarray(npz["point_mask"], dtype=np.uint8)
+            )
             if point_mask.shape != series.shape:
                 raise ValueError(
                     f"point_mask shape mismatch for {npz_path}: expected {series.shape}, got {point_mask.shape}"

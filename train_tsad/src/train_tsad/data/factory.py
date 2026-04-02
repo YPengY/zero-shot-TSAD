@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from torch.utils.data import DataLoader
 
@@ -23,7 +22,6 @@ from .sharded_dataset import ShardedSyntheticTsadDataset, WindowShardedTsadDatas
 from .transforms import RandomPatchMaskingTransform
 from .window_dataset import ContextWindowDataset
 from .windowizer import SlidingContextWindowizer
-
 
 RawDataset = SyntheticTsadDataset | ShardedSyntheticTsadDataset | WindowShardedTsadDataset
 WindowDataset = ContextWindowDataset | WindowShardedTsadDataset
@@ -251,7 +249,9 @@ def infer_fixed_num_features(*datasets: RawDataset | None) -> int:
                 sample_id = str(sample.sample_id)
 
             feature_counts.add(feature_count)
-            sample_counts_by_feature[feature_count] = sample_counts_by_feature.get(feature_count, 0) + 1
+            sample_counts_by_feature[feature_count] = (
+                sample_counts_by_feature.get(feature_count, 0) + 1
+            )
             examples = example_ids_by_feature.setdefault(feature_count, [])
             if len(examples) < 3:
                 examples.append(sample_id)

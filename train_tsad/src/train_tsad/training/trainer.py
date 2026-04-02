@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import torch
 from torch import nn
@@ -29,11 +30,9 @@ from .checkpoint import CheckpointManager
 class EpochEvaluatorProtocol(Protocol):
     """Runtime protocol for validation-time evaluators."""
 
-    def update(self, batch: Batch, output: Any) -> None:
-        ...
+    def update(self, batch: Batch, output: Any) -> None: ...
 
-    def compute(self) -> dict[str, Any]:
-        ...
+    def compute(self) -> dict[str, Any]: ...
 
 
 @dataclass(slots=True)
@@ -167,9 +166,13 @@ class Trainer:
         train_batches = len(train_loader)
         val_batches = len(val_loader) if val_loader is not None else 0
         planned_validation_epochs = sum(
-            1 for epoch in range(1, max_epochs + 1) if val_loader is not None and epoch % validate_every_n_epochs == 0
+            1
+            for epoch in range(1, max_epochs + 1)
+            if val_loader is not None and epoch % validate_every_n_epochs == 0
         )
-        planned_total_units = max(1, max_epochs * train_batches + planned_validation_epochs * val_batches)
+        planned_total_units = max(
+            1, max_epochs * train_batches + planned_validation_epochs * val_batches
+        )
         latest_train_metrics: dict[str, float] | None = None
         latest_val_metrics: dict[str, float] | None = None
 
@@ -177,7 +180,11 @@ class Trainer:
             units = max(epoch - 1, 0) * train_batches
             if val_loader is None or val_batches <= 0:
                 return units
-            units += sum(val_batches for previous_epoch in range(1, epoch) if previous_epoch % validate_every_n_epochs == 0)
+            units += sum(
+                val_batches
+                for previous_epoch in range(1, epoch)
+                if previous_epoch % validate_every_n_epochs == 0
+            )
             return units
 
         def emit_progress(
@@ -280,7 +287,9 @@ class Trainer:
                         split_step_total=update["step_total"],
                         current_split_metrics=update["running_metrics"],
                         current_batch_metrics=update["batch_metrics"],
-                        progress_units=completed_units_before_epoch(epoch) + train_batches + update["step_current"],
+                        progress_units=completed_units_before_epoch(epoch)
+                        + train_batches
+                        + update["step_current"],
                     ),
                 )
                 latest_val_metrics = val_metrics
@@ -357,7 +366,9 @@ class Trainer:
                 stage="epoch_complete",
                 status="running",
                 epoch_current=epoch,
-                progress_units=completed_units_before_epoch(epoch) + train_batches + (val_batches if val_metrics is not None else 0),
+                progress_units=completed_units_before_epoch(epoch)
+                + train_batches
+                + (val_batches if val_metrics is not None else 0),
                 latest_epoch_record=epoch_record,
                 force_write=True,
             )
@@ -479,7 +490,9 @@ class Trainer:
                 metric_sums[name] = metric_sums.get(name, 0.0) + float(value) * batch_size
 
             if progress_callback is not None:
-                running_metrics = {name: total / sample_count for name, total in metric_sums.items()}
+                running_metrics = {
+                    name: total / sample_count for name, total in metric_sums.items()
+                }
                 progress_callback(
                     {
                         "step_current": step,
@@ -582,7 +595,10 @@ class Trainer:
         if self.checkpoint_manager is None:
             return
         now = time.perf_counter()
-        if not force and (now - self._last_progress_write_time) < self.progress_write_interval_seconds:
+        if (
+            not force
+            and (now - self._last_progress_write_time) < self.progress_write_interval_seconds
+        ):
             return
         self._last_progress_write_time = now
 
@@ -597,7 +613,9 @@ class Trainer:
             "epoch_total": int(epoch_total),
             "epochs_completed": int(epochs_completed),
             "split": split,
-            "split_step_current": int(split_step_current) if split_step_current is not None else None,
+            "split_step_current": int(split_step_current)
+            if split_step_current is not None
+            else None,
             "split_step_total": int(split_step_total) if split_step_total is not None else None,
             "split_progress_ratio": split_progress_ratio,
             "overall_progress_ratio": overall_progress_ratio,

@@ -43,7 +43,9 @@ def _iter_raw_records_from_jsonl(manifest_path: Path) -> Iterator[_RawSampleReco
     """Yield raw sample records described by a JSONL manifest."""
 
     base_dir = manifest_path.parent
-    for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        manifest_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         row = json.loads(line)
@@ -86,7 +88,9 @@ def _iter_shard_records_from_jsonl(manifest_path: Path) -> Iterator[_ShardSample
     """Yield shard-backed sample records described by a JSONL manifest."""
 
     base_dir = manifest_path.parent
-    for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        manifest_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         row = json.loads(line)
@@ -112,7 +116,9 @@ def _iter_window_shard_records_from_jsonl(manifest_path: Path) -> Iterator[_Wind
     """Yield pre-windowed shard records from a JSONL manifest."""
 
     base_dir = manifest_path.parent
-    for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        manifest_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not line.strip():
             continue
         row = json.loads(line)

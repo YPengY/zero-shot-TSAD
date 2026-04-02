@@ -8,10 +8,10 @@ modules can assume already-normalized settings instead of re-validating them.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 try:
     import yaml
@@ -145,9 +145,7 @@ class ModelConfig:
         if not 0.0 <= self.attention_dropout < 1.0:
             raise ValueError("`model.attention_dropout` must be in [0, 1).")
         if self.anomaly_patch_aggregation not in {"or", "mean", "max"}:
-            raise ValueError(
-                "`model.anomaly_patch_aggregation` must be one of: or, mean, max."
-            )
+            raise ValueError("`model.anomaly_patch_aggregation` must be one of: or, mean, max.")
 
 
 @dataclass(slots=True)
@@ -176,7 +174,9 @@ class LossConfig:
             raise ValueError("`loss.anomaly_loss_type` must be one of: bce, asl.")
         if isinstance(self.anomaly_pos_weight, str):
             if self.anomaly_pos_weight != "auto":
-                raise ValueError("`loss.anomaly_pos_weight` must be a positive float, null, or `auto`.")
+                raise ValueError(
+                    "`loss.anomaly_pos_weight` must be a positive float, null, or `auto`."
+                )
         elif self.anomaly_pos_weight is not None and self.anomaly_pos_weight <= 0:
             raise ValueError("`loss.anomaly_pos_weight` must be positive when provided.")
         if self.anomaly_asl_gamma_neg < 0:
@@ -279,9 +279,7 @@ class EvalConfig:
 
     def __post_init__(self) -> None:
         if self.task not in {"patch_feature", "point_any_feature_legacy"}:
-            raise ValueError(
-                "`eval.task` must be one of: patch_feature, point_any_feature_legacy."
-            )
+            raise ValueError("`eval.task` must be one of: patch_feature, point_any_feature_legacy.")
         if not self.primary_metric.strip():
             raise ValueError("`eval.primary_metric` cannot be empty.")
         if self.primary_metric_mode not in {"min", "max"}:
@@ -289,9 +287,7 @@ class EvalConfig:
         if not 0.0 <= self.threshold <= 1.0:
             raise ValueError("`eval.threshold` must be in [0, 1].")
         if self.patch_feature_score_aggregation not in {"mean", "max"}:
-            raise ValueError(
-                "`eval.patch_feature_score_aggregation` must be one of: mean, max."
-            )
+            raise ValueError("`eval.patch_feature_score_aggregation` must be one of: mean, max.")
 
 
 @dataclass(slots=True)
@@ -315,7 +311,10 @@ class ExperimentConfig:
             raise ValueError(
                 "`data.patch_size` must match `model.patch_size` to keep patch labels aligned."
             )
-        if self.loss.point_anomaly_loss_weight > 0.0 and not self.model.use_observation_space_anomaly_head:
+        if (
+            self.loss.point_anomaly_loss_weight > 0.0
+            and not self.model.use_observation_space_anomaly_head
+        ):
             raise ValueError(
                 "`loss.point_anomaly_loss_weight > 0` requires "
                 "`model.use_observation_space_anomaly_head = true`."
@@ -421,4 +420,3 @@ __all__ = [
     "TrainConfig",
     "build_timercd_base_config",
 ]
-

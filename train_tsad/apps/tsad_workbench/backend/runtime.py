@@ -113,7 +113,9 @@ def estimate_generation_required_bytes(
     total_samples = sum(max(0, int(count)) for count in split_counts.values())
     float_bytes = np.dtype(np.float64).itemsize
     uint8_bytes = np.dtype(np.uint8).itemsize
-    bytes_per_timestep = (2 * float_bytes * num_series_max) + (uint8_bytes * num_series_max) + uint8_bytes
+    bytes_per_timestep = (
+        (2 * float_bytes * num_series_max) + (uint8_bytes * num_series_max) + uint8_bytes
+    )
     raw_array_bytes = total_samples * sequence_length_max * bytes_per_timestep
     metadata_bytes = total_samples * DEFAULT_METADATA_BYTES_PER_SAMPLE
     raw_npz_overhead = total_samples * DEFAULT_NPZ_OVERHEAD_BYTES_PER_SAMPLE
@@ -183,7 +185,10 @@ def resolve_run_root(path_like: str) -> Path:
         return raw_path
     if (raw_path / "data_packed_windows" / "manifest.train.jsonl").exists():
         return raw_path
-    if (raw_path / "manifest.train.jsonl").exists() and raw_path.name in {"data_packed", "data_packed_windows"}:
+    if (raw_path / "manifest.train.jsonl").exists() and raw_path.name in {
+        "data_packed",
+        "data_packed_windows",
+    }:
         return raw_path.parent
     if (raw_path / "manifest.train.jsonl").exists():
         return raw_path
@@ -287,7 +292,11 @@ def build_workbench_train_config(
         or DEFAULT_WORKBENCH_TRAIN_TEMPLATE
     )
     template_path = TRAIN_TSAD_ROOT / "configs" / template_name
-    if not template_path.exists() and allow_template_fallback and template_name != DEFAULT_WORKBENCH_TRAIN_TEMPLATE:
+    if (
+        not template_path.exists()
+        and allow_template_fallback
+        and template_name != DEFAULT_WORKBENCH_TRAIN_TEMPLATE
+    ):
         template_name = DEFAULT_WORKBENCH_TRAIN_TEMPLATE
         template_path = TRAIN_TSAD_ROOT / "configs" / template_name
     if not template_path.exists():
@@ -331,7 +340,9 @@ def ensure_train_config_for_run(run_root: Path) -> tuple[Path, dict[str, Any], b
         allow_template_fallback=True,
     )
     train_config_path = config_dir / "train_generated.json"
-    train_config_path.write_text(json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    train_config_path.write_text(
+        json.dumps(train_config, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return train_config_path, train_config, True
 
 

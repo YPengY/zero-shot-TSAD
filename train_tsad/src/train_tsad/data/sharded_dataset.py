@@ -6,7 +6,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ..interfaces import ContextWindowSample, ContextWindowizerProtocol, Metadata, RawSample, SplitName
+from ..interfaces import (
+    ContextWindowizerProtocol,
+    ContextWindowSample,
+    Metadata,
+    RawSample,
+    SplitName,
+)
 from .manifest import _iter_shard_records_from_jsonl, _iter_window_shard_records_from_jsonl
 from .records import _ShardSampleGeometry, _ShardSampleRecord, _WindowShardRecord
 
@@ -66,9 +72,7 @@ class ShardedSyntheticTsadDataset:
                 .copy()
             )
         point_mask = (
-            shard_arrays["point_mask_values"][
-                geometry.sample_flat_start : geometry.sample_flat_end
-            ]
+            shard_arrays["point_mask_values"][geometry.sample_flat_start : geometry.sample_flat_end]
             .reshape(geometry.length, geometry.num_dim)
             .copy()
         )
@@ -150,7 +154,9 @@ class ShardedSyntheticTsadDataset:
         )
         normal_series_window = None
         if self.load_normal_series and "normal_series_values" in shard_arrays:
-            normal_series_window = shard_arrays["normal_series_values"][flat_start:flat_end].reshape(
+            normal_series_window = shard_arrays["normal_series_values"][
+                flat_start:flat_end
+            ].reshape(
                 window_length,
                 geometry.num_dim,
             )
@@ -349,7 +355,9 @@ class WindowShardedTsadDataset:
             )
 
         series = np.asarray(shard_arrays["series_windows"][window_index], dtype=np.float32).copy()
-        point_mask = np.asarray(shard_arrays["point_mask_windows"][window_index], dtype=np.uint8).copy()
+        point_mask = np.asarray(
+            shard_arrays["point_mask_windows"][window_index], dtype=np.uint8
+        ).copy()
         patch_labels = np.asarray(
             shard_arrays["patch_labels_windows"][window_index],
             dtype=np.uint8,
@@ -360,7 +368,9 @@ class WindowShardedTsadDataset:
         context_start = int(record.context_start)
         context_end = int(record.context_end)
         if "context_start" in shard_arrays:
-            context_start = int(np.asarray(shard_arrays["context_start"], dtype=np.int32)[window_index])
+            context_start = int(
+                np.asarray(shard_arrays["context_start"], dtype=np.int32)[window_index]
+            )
         if "context_end" in shard_arrays:
             context_end = int(np.asarray(shard_arrays["context_end"], dtype=np.int32)[window_index])
         if context_end <= context_start:

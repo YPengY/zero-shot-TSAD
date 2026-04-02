@@ -84,7 +84,9 @@ class PatchAnomalyLoss(nn.Module):
                 )
             valid_mask = valid_mask.to(device=logits.device, dtype=torch.bool)
             if not torch.any(valid_mask):
-                raise ValueError("`batch.patch_valid_mask` does not contain any valid anomaly units.")
+                raise ValueError(
+                    "`batch.patch_valid_mask` does not contain any valid anomaly units."
+                )
             logits = logits[valid_mask]
             targets = targets[valid_mask]
 
@@ -182,7 +184,9 @@ class PatchAsymmetricLoss(nn.Module):
                 )
             valid_mask = valid_mask.to(device=logits.device, dtype=torch.bool)
             if not torch.any(valid_mask):
-                raise ValueError("`batch.patch_valid_mask` does not contain any valid anomaly units.")
+                raise ValueError(
+                    "`batch.patch_valid_mask` does not contain any valid anomaly units."
+                )
             logits = logits[valid_mask]
             targets = targets[valid_mask]
 

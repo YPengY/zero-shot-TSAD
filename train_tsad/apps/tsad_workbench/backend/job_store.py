@@ -6,9 +6,10 @@ import time
 import traceback
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .environment import JOB_LOG_LIMIT, PREVIEW_CACHE_LIMIT
 
@@ -99,7 +100,12 @@ class JobStore:
             "error": job.error,
         }
 
-    def run_job(self, job: JobState, fn: Callable[[dict[str, Any], JobState], dict[str, Any]], payload: dict[str, Any]) -> None:
+    def run_job(
+        self,
+        job: JobState,
+        fn: Callable[[dict[str, Any], JobState], dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> None:
         """Execute one job function and persist its terminal state."""
 
         with self._lock:

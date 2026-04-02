@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from .runtime import count_manifest_rows, resolve_packed_root
+from .runtime import resolve_packed_root
 
 
 def iter_context_bounds(
@@ -73,7 +73,11 @@ def build_patch_labels_1d(point_mask: np.ndarray, *, patch_size: int) -> np.ndar
         return np.zeros((0,), dtype=np.uint8)
 
     trimmed = np.asarray(point_mask[:trimmed_length], dtype=np.uint8)
-    return trimmed.reshape(trimmed_length // patch_size, patch_size).max(axis=1).astype(np.uint8, copy=False)
+    return (
+        trimmed.reshape(trimmed_length // patch_size, patch_size)
+        .max(axis=1)
+        .astype(np.uint8, copy=False)
+    )
 
 
 def describe_window(
@@ -92,7 +96,11 @@ def describe_window(
     total_patch_count = trimmed_length // patch_size if patch_size > 0 else 0
     valid_patch_count = min(effective_length, trimmed_length) // patch_size if patch_size > 0 else 0
     is_short_window = sequence_length < context_size
-    is_tail_window = sequence_length >= context_size and effective_length < context_size and end == sequence_length
+    is_tail_window = (
+        sequence_length >= context_size
+        and effective_length < context_size
+        and end == sequence_length
+    )
     return {
         "effective_length": int(effective_length),
         "padded_steps": int(padded_steps),
@@ -161,7 +169,9 @@ def load_sample_from_manifest_row(*, packed_root: Path, row: dict[str, Any]) -> 
                 )
             length = int(series.shape[0])
             dims = int(series.shape[1])
-            valid_length = int(valid_lengths[sample_index]) if sample_index < len(valid_lengths) else length
+            valid_length = (
+                int(valid_lengths[sample_index]) if sample_index < len(valid_lengths) else length
+            )
             valid_length = max(0, min(valid_length, length))
             point_mask_any = np.zeros((length,), dtype=np.uint8)
             if valid_length > 0:
@@ -185,10 +195,18 @@ def load_sample_from_manifest_row(*, packed_root: Path, row: dict[str, Any]) -> 
             time_start = int(time_offsets[sample_index])
             time_end = int(time_offsets[sample_index + 1])
 
-            series = np.asarray(npz["series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
-            normal_series = np.asarray(npz["normal_series_values"][flat_start:flat_end], dtype=np.float32).reshape(length, dims)
-            point_mask = np.asarray(npz["point_mask_values"][flat_start:flat_end], dtype=np.uint8).reshape(length, dims)
-            point_mask_any = np.asarray(npz["point_mask_any_values"][time_start:time_end], dtype=np.uint8)
+            series = np.asarray(
+                npz["series_values"][flat_start:flat_end], dtype=np.float32
+            ).reshape(length, dims)
+            normal_series = np.asarray(
+                npz["normal_series_values"][flat_start:flat_end], dtype=np.float32
+            ).reshape(length, dims)
+            point_mask = np.asarray(
+                npz["point_mask_values"][flat_start:flat_end], dtype=np.uint8
+            ).reshape(length, dims)
+            point_mask_any = np.asarray(
+                npz["point_mask_any_values"][time_start:time_end], dtype=np.uint8
+            )
 
     metadata: dict[str, Any] = {}
     if debug_jsonl_path_raw is not None:
@@ -256,7 +274,11 @@ def build_sample_payload(
 
     packed_root = resolve_packed_root(path_like)
     row = next(
-        (entry for entry in load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
+        (
+            entry
+            for entry in load_manifest_rows(packed_root, split)
+            if str(entry.get("sample_id")) == sample_id
+        ),
         None,
     )
     if row is None:
@@ -336,7 +358,9 @@ def build_sample_payload(
         "slice_start": slice_start,
         "slice_end": slice_end,
         "series_feature": series[slice_start:slice_end, feature_index].astype(float).tolist(),
-        "normal_series_feature": normal_series[slice_start:slice_end, feature_index].astype(float).tolist(),
+        "normal_series_feature": normal_series[slice_start:slice_end, feature_index]
+        .astype(float)
+        .tolist(),
         "point_mask_feature": point_mask[slice_start:slice_end, feature_index].astype(int).tolist(),
         "point_mask_any": point_mask_any[slice_start:slice_end].astype(int).tolist(),
         "anomaly_ratio_feature": float(point_mask[:, feature_index].mean()),
@@ -373,7 +397,11 @@ def build_window_payload(
 
     packed_root = resolve_packed_root(path_like)
     row = next(
-        (entry for entry in load_manifest_rows(packed_root, split) if str(entry.get("sample_id")) == sample_id),
+        (
+            entry
+            for entry in load_manifest_rows(packed_root, split)
+            if str(entry.get("sample_id")) == sample_id
+        ),
         None,
     )
     if row is None:
@@ -466,6 +494,8 @@ def build_window_payload(
         "padding_mask": padding_mask.astype(int).tolist(),
         "patch_labels": patch_labels,
         "patch_alignment_warning": (
-            None if context_size % patch_size == 0 else "context_size is not divisible by patch_size"
+            None
+            if context_size % patch_size == 0
+            else "context_size is not divisible by patch_size"
         ),
     }

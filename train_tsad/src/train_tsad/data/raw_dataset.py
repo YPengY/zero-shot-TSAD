@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..interfaces import (
-    ContextWindowSample,
     ContextWindowizerProtocol,
+    ContextWindowSample,
     RawSample,
     SplitName,
 )

@@ -8,8 +8,8 @@ and attention layers.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 import numpy as np
 import torch
@@ -86,7 +86,9 @@ def _build_point_valid_mask(
 ) -> np.ndarray:
     """Build point-level validity mask `[B, W, D]` from valid lengths."""
 
-    point_valid_mask = np.zeros((valid_lengths.shape[0], context_size, num_features), dtype=np.bool_)
+    point_valid_mask = np.zeros(
+        (valid_lengths.shape[0], context_size, num_features), dtype=np.bool_
+    )
     for batch_index, valid_length in enumerate(valid_lengths.tolist()):
         if valid_length <= 0:
             continue
@@ -181,7 +183,9 @@ class ContextWindowCollator(CollatorProtocol):
 
         splits = {sample.split for sample in samples}
         if len(splits) != 1:
-            raise ValueError(f"Mixed dataset splits are not allowed in one batch: {sorted(splits)}.")
+            raise ValueError(
+                f"Mixed dataset splits are not allowed in one batch: {sorted(splits)}."
+            )
 
         series_array = _stack_required(
             [np.asarray(sample.series, dtype=np.float32) for sample in samples],

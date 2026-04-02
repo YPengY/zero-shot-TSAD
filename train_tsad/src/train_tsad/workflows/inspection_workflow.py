@@ -76,7 +76,9 @@ def run_inspection(
             f"missing_splits={missing_splits}"
         )
 
-    if any(bool(getattr(dataset, "is_prewindowed", False)) for dataset in datasets_by_split.values()):
+    if any(
+        bool(getattr(dataset, "is_prewindowed", False)) for dataset in datasets_by_split.values()
+    ):
         payload: dict[str, Any] = {
             "summary": {
                 "expected_training_split": config.data.split,

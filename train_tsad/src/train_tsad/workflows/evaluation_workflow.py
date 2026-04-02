@@ -8,7 +8,12 @@ from typing import Any
 import torch
 
 from ..config import ExperimentConfig
-from ..data import auto_select_available_split, build_evaluation_loader, build_raw_dataset, infer_fixed_num_features
+from ..data import (
+    auto_select_available_split,
+    build_evaluation_loader,
+    build_raw_dataset,
+    infer_fixed_num_features,
+)
 from ..evaluation import build_evaluator
 from ..models import build_timercd_model
 from ..utils import resolve_path, resolve_torch_device, write_json_file

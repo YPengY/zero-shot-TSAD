@@ -51,7 +51,9 @@ def run_parallel_split_generation(
     if not split_commands:
         return
 
-    job_store.append_log(job, f"Launching {len(split_commands)} split generation processes in parallel.")
+    job_store.append_log(
+        job, f"Launching {len(split_commands)} split generation processes in parallel."
+    )
     failures: list[str] = []
     max_workers = min(len(split_commands), 3)
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="wb-generate") as executor:

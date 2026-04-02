@@ -55,7 +55,9 @@ def iter_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
     """
 
     jsonl_path = Path(path)
-    for line_number, line in enumerate(jsonl_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(
+        jsonl_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         row_text = line.strip()
         if not row_text:
             continue

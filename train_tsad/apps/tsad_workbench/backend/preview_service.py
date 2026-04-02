@@ -4,7 +4,12 @@ from typing import Any
 
 from .environment import PREVIEW_CACHE_LIMIT, PROJECT_ROOT, TRAIN_TSAD_ROOT
 from .job_store import PreviewStore
-from .runtime import default_runs_root, generate_default_run_name, json_clone, resolve_python_executable
+from .runtime import (
+    default_runs_root,
+    generate_default_run_name,
+    json_clone,
+    resolve_python_executable,
+)
 from .studio_bridge import get_bootstrap_payload, preview_sample
 
 
@@ -79,7 +84,11 @@ def build_bootstrap_payload() -> dict[str, Any]:
         "default_train_template": (
             "timercd_pretrain_paper_aligned.json"
             if "timercd_pretrain_paper_aligned.json" in templates
-            else ("timercd_small.json" if "timercd_small.json" in templates else (templates[0] if templates else None))
+            else (
+                "timercd_small.json"
+                if "timercd_small.json" in templates
+                else (templates[0] if templates else None)
+            )
         ),
         "train_templates": templates,
         "generation_defaults": {

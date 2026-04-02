@@ -8,8 +8,9 @@ stay modular.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -89,23 +90,23 @@ class Batch:
     """
 
     sample_ids: list[str]
-    context_start: "torch.Tensor"
-    context_end: "torch.Tensor"
-    valid_lengths: "torch.Tensor"
-    inputs: "torch.Tensor"
-    patch_labels: "torch.Tensor | None" = None
-    reconstruction_targets: "torch.Tensor | None" = None
-    mask_indices: "torch.Tensor | None" = None
-    point_valid_mask: "torch.Tensor | None" = None
-    patch_valid_mask: "torch.Tensor | None" = None
-    token_padding_mask: "torch.Tensor | None" = None
-    point_masks: "torch.Tensor | None" = None
-    point_mask_any: "torch.Tensor | None" = None
+    context_start: torch.Tensor
+    context_end: torch.Tensor
+    valid_lengths: torch.Tensor
+    inputs: torch.Tensor
+    patch_labels: torch.Tensor | None = None
+    reconstruction_targets: torch.Tensor | None = None
+    mask_indices: torch.Tensor | None = None
+    point_valid_mask: torch.Tensor | None = None
+    patch_valid_mask: torch.Tensor | None = None
+    token_padding_mask: torch.Tensor | None = None
+    point_masks: torch.Tensor | None = None
+    point_mask_any: torch.Tensor | None = None
     metadata: Metadata = field(default_factory=dict)
 
     def to(
         self,
-        device: "str | torch.device",
+        device: str | torch.device,
         *,
         non_blocking: bool = False,
     ) -> Batch:
@@ -170,16 +171,16 @@ class ModelOutput:
     - `reconstruction`: must align with `Batch.reconstruction_targets` when used
     """
 
-    logits: "torch.Tensor"
-    point_logits: "torch.Tensor | None" = None
-    reconstruction: "torch.Tensor | None" = None
+    logits: torch.Tensor
+    point_logits: torch.Tensor | None = None
+    reconstruction: torch.Tensor | None = None
 
 
 @dataclass(slots=True)
 class LossOutput:
     """Unified loss payload returned by loss modules."""
 
-    loss: "torch.Tensor"
+    loss: torch.Tensor
     metrics: dict[str, float] = field(default_factory=dict)
 
 
@@ -187,22 +188,18 @@ class LossOutput:
 class DatasetProtocol(Protocol):
     """Protocol for datasets that load full synthetic samples."""
 
-    def __len__(self) -> int:
-        ...
+    def __len__(self) -> int: ...
 
-    def __getitem__(self, index: int) -> RawSample:
-        ...
+    def __getitem__(self, index: int) -> RawSample: ...
 
 
 @runtime_checkable
 class ContextWindowizerProtocol(Protocol):
     """Protocol for slicing full sequences into context windows."""
 
-    def iter_context_bounds(self, sequence_length: int) -> Sequence[tuple[int, int]]:
-        ...
+    def iter_context_bounds(self, sequence_length: int) -> Sequence[tuple[int, int]]: ...
 
-    def transform(self, sample: RawSample) -> Sequence[ContextWindowSample]:
-        ...
+    def transform(self, sample: RawSample) -> Sequence[ContextWindowSample]: ...
 
     def slice_window(
         self,
@@ -210,32 +207,28 @@ class ContextWindowizerProtocol(Protocol):
         *,
         start: int,
         end: int,
-    ) -> ContextWindowSample:
-        ...
+    ) -> ContextWindowSample: ...
 
 
 @runtime_checkable
 class CollatorProtocol(Protocol):
     """Protocol for batching context windows into model-ready tensors."""
 
-    def __call__(self, samples: Sequence[ContextWindowSample]) -> Batch:
-        ...
+    def __call__(self, samples: Sequence[ContextWindowSample]) -> Batch: ...
 
 
 @runtime_checkable
 class ModelProtocol(Protocol):
     """Protocol shared by baseline and TimeRCD-style models."""
 
-    def forward(self, batch: Batch) -> ModelOutput:
-        ...
+    def forward(self, batch: Batch) -> ModelOutput: ...
 
 
 @runtime_checkable
 class LossProtocol(Protocol):
     """Protocol for anomaly-only or multi-task loss functions."""
 
-    def __call__(self, batch: Batch, output: ModelOutput) -> LossOutput:
-        ...
+    def __call__(self, batch: Batch, output: ModelOutput) -> LossOutput: ...
 
 
 __all__ = [

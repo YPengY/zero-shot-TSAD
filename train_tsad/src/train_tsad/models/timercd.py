@@ -150,8 +150,7 @@ class TimeRCDModel(nn.Module):
 
         if point_logits.ndim != 3:
             raise ValueError(
-                "`point_logits` must have shape [B, W, D]. "
-                f"Got ndim={point_logits.ndim}."
+                f"`point_logits` must have shape [B, W, D]. Got ndim={point_logits.ndim}."
             )
         if point_logits.shape[1] != num_patches * self.patch_size:
             raise ValueError(
@@ -179,7 +178,9 @@ class TimeRCDModel(nn.Module):
                     "`batch.point_valid_mask` must match `point_logits` shape. "
                     f"Got {tuple(point_valid_mask.shape)} vs {tuple(point_logits.shape)}."
                 )
-            valid_mask_grid = point_valid_mask.to(device=point_logits.device, dtype=torch.bool).reshape(
+            valid_mask_grid = point_valid_mask.to(
+                device=point_logits.device, dtype=torch.bool
+            ).reshape(
                 point_logits.shape[0],
                 num_patches,
                 self.patch_size,
@@ -206,8 +207,7 @@ class TimeRCDModel(nn.Module):
             patch_probabilities = point_probability_grid.max(dim=2).values
         else:
             raise ValueError(
-                f"Unsupported anomaly patch aggregation `{aggregation}`. "
-                "Supported: or, mean, max."
+                f"Unsupported anomaly patch aggregation `{aggregation}`. Supported: or, mean, max."
             )
 
         patch_probabilities = patch_probabilities.clamp(min=1e-6, max=1.0 - 1e-6)

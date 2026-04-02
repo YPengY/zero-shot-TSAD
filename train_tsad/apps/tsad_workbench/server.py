@@ -10,7 +10,11 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from backend.dataset_browser import build_sample_payload, build_samples_payload, build_window_payload
+from backend.dataset_browser import (
+    build_sample_payload,
+    build_samples_payload,
+    build_window_payload,
+)
 from backend.environment import PREVIEW_CACHE_LIMIT, STATIC_DIR
 from backend.job_services import run_generation_job, run_train_job
 from backend.job_store import JobStore, PreviewStore
@@ -22,7 +26,6 @@ from backend.preview_service import (
 from backend.runtime import build_run_info
 from backend.studio_bridge import import_config_text, randomize_config
 from backend.training_metrics import build_train_metrics_payload
-
 
 JOB_STORE = JobStore()
 PREVIEW_STORE = PreviewStore()
@@ -116,7 +119,11 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
     def _handle_randomize(self) -> None:
         try:
             body = self._read_json_body(optional=True)
-            seed = int(body["seed"]) if isinstance(body, dict) and body.get("seed") is not None else None
+            seed = (
+                int(body["seed"])
+                if isinstance(body, dict) and body.get("seed") is not None
+                else None
+            )
             self._write_json(HTTPStatus.OK, {"config": randomize_config(seed=seed)})
         except Exception as exc:
             self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -216,7 +223,9 @@ class WorkbenchRequestHandler(SimpleHTTPRequestHandler):
                     slice_start=max(0, int(query.get("slice_start", [0])[0])),
                     slice_end=int(query.get("slice_end", [0])[0]),
                     context_size=max(1, int(query.get("context_size", [512])[0])),
-                    stride=max(1, int(query.get("stride", [int(query.get("context_size", [512])[0])])[0])),
+                    stride=max(
+                        1, int(query.get("stride", [int(query.get("context_size", [512])[0])])[0])
+                    ),
                     patch_size=max(1, int(query.get("patch_size", [16])[0])),
                 ),
             )
@@ -307,7 +316,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TSAD Workbench interactive frontend")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8777, help="Port to bind")
-    parser.add_argument("--open-browser", action="store_true", help="Open the browser after startup")
+    parser.add_argument(
+        "--open-browser", action="store_true", help="Open the browser after startup"
+    )
     args = parser.parse_args()
 
     server = make_server(args.host, int(args.port))

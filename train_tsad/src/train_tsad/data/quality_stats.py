@@ -221,7 +221,9 @@ class SplitStatisticsAccumulator:
             self.point_mask_any_mismatch_points += mismatches
             self.point_mask_any_total_points += sample_length
 
-    def observe_normal_series(self, normal_series_raw: np.ndarray | None, *, series: np.ndarray) -> None:
+    def observe_normal_series(
+        self, normal_series_raw: np.ndarray | None, *, series: np.ndarray
+    ) -> None:
         if normal_series_raw is None:
             return
 
@@ -368,7 +370,9 @@ def collect_split_statistics(
     """Collect descriptive statistics for one raw split before training."""
 
     num_samples_total = int(len(raw_dataset))
-    analyzed_samples = num_samples_total if max_samples is None else min(num_samples_total, int(max_samples))
+    analyzed_samples = (
+        num_samples_total if max_samples is None else min(num_samples_total, int(max_samples))
+    )
     accumulator = SplitStatisticsAccumulator(windowizer=windowizer)
 
     for sample_index in range(analyzed_samples):
