@@ -24,4 +24,5 @@ datasets/
 # Local experiment artifacts
 analysis_tmp/
 runs/
+.tmp_*
 

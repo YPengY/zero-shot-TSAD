@@ -37,3 +37,35 @@ jobs:
 
       - name: Pytest
         run: python -m pytest -q
+
+  train-tsad:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: train_tsad
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install projects
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ../synthetic_tsad
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff format check
+        run: python -m ruff format --check src apps tests scripts
+
+      - name: Ruff lint
+        run: python -m ruff check src apps tests scripts
+
+      - name: Pyright
+        run: python -m pyright src
+
+      - name: Pytest
+        run: python -m pytest -q

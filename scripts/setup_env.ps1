@@ -4,8 +4,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$venvPath = Join-Path $projectRoot ".venv"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$venvPath = Join-Path $repoRoot ".venv"
 
 if ($Recreate -and (Test-Path $venvPath)) {
     Write-Host "Removing existing .venv ..."
@@ -51,12 +51,13 @@ if (-not (Test-PipAvailable -PythonPath $venvPython)) {
 }
 
 & $venvPython -m pip install -U pip
-Push-Location $projectRoot
+
+Push-Location $repoRoot
 try {
-    & $venvPython -m pip install -e ".[dev]"
+    & $venvPython -m pip install -e ".\synthetic_tsad[dev]" -e ".\train_tsad[dev]"
 } finally {
     Pop-Location
 }
 
 Write-Host "Environment ready: $venvPython"
-& $venvPython -c "import sys, numpy; print(sys.executable); print('numpy', numpy.__version__)"
+& $venvPython -c "import sys, numpy, torch, yaml; print(sys.executable); print('numpy', numpy.__version__); print('torch', torch.__version__); print('yaml', yaml.__version__)"

@@ -1,10 +1,13 @@
 param(
     [string]$PythonExe = "python",
-    [switch]$Recreate
+    [switch]$Recreate,
+    [switch]$SkipSyntheticTsad
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent $projectRoot
+$syntheticRoot = Join-Path $repoRoot "synthetic_tsad"
 $venvPath = Join-Path $projectRoot ".venv"
 
 if ($Recreate -and (Test-Path $venvPath)) {
@@ -51,12 +54,16 @@ if (-not (Test-PipAvailable -PythonPath $venvPython)) {
 }
 
 & $venvPython -m pip install -U pip
+
 Push-Location $projectRoot
 try {
     & $venvPython -m pip install -e ".[dev]"
+    if ((-not $SkipSyntheticTsad) -and (Test-Path $syntheticRoot)) {
+        & $venvPython -m pip install -e $syntheticRoot
+    }
 } finally {
     Pop-Location
 }
 
 Write-Host "Environment ready: $venvPython"
-& $venvPython -c "import sys, numpy; print(sys.executable); print('numpy', numpy.__version__)"
+& $venvPython -c "import sys, numpy, torch, yaml; print(sys.executable); print('numpy', numpy.__version__); print('torch', torch.__version__); print('yaml', yaml.__version__)"

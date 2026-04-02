@@ -37,12 +37,43 @@ The workflow is parameter-first: it samples parameters first, then realizes fina
 - `src/synthtsad/io/writer.py`: output writer.
 - `tests/test_*.py`: pytest smoke/regression coverage for stable config and CLI-adjacent paths.
 
-## Environment Setup (Windows)
+## Dependencies
 
-This repository does not commit local `.venv`, generated `outputs*`, or cache directories. Recreate the local environment before running commands.
+Runtime:
+
+- Python `>=3.10`
+- `numpy>=1.26`
+- `PyYAML>=6.0`
+
+Dev / quality gate:
+
+- `pytest>=8.0`
+- `pyright>=1.1.390`
+- `ruff>=0.11.0`
+- `types-PyYAML>=6.0.12`
+
+Install from this folder:
 
 ```powershell
-cd C:\Users\Administrator\Desktop\TSAD\synthetic_tsad
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+## Environment Setup (Windows)
+
+This repository does not commit local `.venv`, generated `outputs*`, or cache directories.
+
+For repository-wide work, prefer the root setup script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1
+```
+
+If you want an isolated environment just for `synthetic_tsad`, recreate it inside this folder before running commands:
+
+```powershell
+cd .\synthetic_tsad
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1
 ```
 

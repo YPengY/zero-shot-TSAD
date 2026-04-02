@@ -4,10 +4,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+$pythonExe = Join-Path $projectRoot ".venv\\Scripts\\python.exe"
 
-if ($null -eq $pythonCommand) {
-    throw "Python runtime not found on PATH."
+if (-not (Test-Path $pythonExe)) {
+    throw "Virtual environment python not found: $pythonExe`nRun .\\scripts\\setup_env.ps1 first."
 }
 
 $targets = @("src", "apps", "scripts")
@@ -18,15 +18,15 @@ if (Test-Path (Join-Path $projectRoot "tests")) {
 Push-Location $projectRoot
 try {
     if ($Fix) {
-        & $pythonCommand.Source -m ruff format @targets
-        & $pythonCommand.Source -m ruff check --fix @targets
+        & $pythonExe -m ruff format @targets
+        & $pythonExe -m ruff check --fix @targets
     } else {
-        & $pythonCommand.Source -m ruff format --check @targets
-        & $pythonCommand.Source -m ruff check @targets
+        & $pythonExe -m ruff format --check @targets
+        & $pythonExe -m ruff check @targets
     }
 
-    & $pythonCommand.Source -m pyright src
-    & $pythonCommand.Source -m pytest -q
+    & $pythonExe -m pyright src
+    & $pythonExe -m pytest -q
 } finally {
     Pop-Location
 }
